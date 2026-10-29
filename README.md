@@ -53,6 +53,15 @@ bash examples/smoke_train.sh
 覆盖位置。这个示例仅验证安装与训练链路，不是完整模型训练或通用精度认证。
 多机正式训练仍需按任务配置节点数、rank、master 地址和训练数据。
 
+## 四机完整模型 LoRA 训练
+
+4 台 × 每台 16 张 64GB NPU 的启动脚本为
+[`examples/train_full_lora_4nodes.sh`](examples/train_full_lora_4nodes.sh)。
+保留全部 40 层、384 专家和两个 Engram，默认 TP1/PP4/EP16。
+使用仓库自带测试数据，在四台机器分别启动 rank 0–3；
+具体命令和参数见 [四机启动说明](examples/README_full_lora_4nodes.md)。
+此脚本已验证 Engram map 生成与参数解析，尚未实测四机完整模型训练。
+
 ## 完整环境与精度说明
 
 参见 [DeepSeek V4.1 Flash：NPU 软件环境、补丁与 GPU 精度验证](docs/DeepSeek_V41_Flash_NPU_环境与精度验证.md)，包含版本矩阵、安装流程、实际报错及补丁、200 步对比方法与结果边界。

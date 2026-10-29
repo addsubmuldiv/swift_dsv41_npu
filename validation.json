@@ -149,5 +149,23 @@
     "source_checks": "all five source components under this checkout",
     "initialization_passed": true,
     "npu_matmul_passed": true
+  },
+  "four_node_full_lora_script": {
+    "dataset": "examples/data.jsonl",
+    "dataset_rows": 32,
+    "full_model_engram_map_generation_tested": true,
+    "full_model_engram_map_layer_ids": [
+      1,
+      14
+    ],
+    "all_four_rank_commands_parsed": true,
+    "planned_nodes": 4,
+    "planned_npus_per_node": 16,
+    "planned_tp": 1,
+    "planned_pp": 4,
+    "planned_ep": 16,
+    "planned_steps": 10,
+    "full_model_training_tested": false,
+    "multi_node_training_tested": false
   }
 }
