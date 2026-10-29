@@ -59,6 +59,7 @@ bash examples/smoke_train.sh
 [`examples/train_full_lora_4nodes.sh`](examples/train_full_lora_4nodes.sh)。
 保留全部 40 层、384 专家和两个 Engram，默认 TP1/PP4/EP16。
 使用仓库自带测试数据，在四台机器分别启动 rank 0–3；
+主节点自动发布 IP，其余节点从共享盘读取，无需手填地址；
 具体命令和参数见 [四机启动说明](examples/README_full_lora_4nodes.md)。
 此脚本已验证 Engram map 生成与参数解析，尚未实测四机完整模型训练。
 

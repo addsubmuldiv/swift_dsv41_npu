@@ -166,6 +166,11 @@
     "planned_ep": 16,
     "planned_steps": 10,
     "full_model_training_tested": false,
-    "multi_node_training_tested": false
+    "multi_node_training_tested": false,
+    "address_discovery_dry_run_checks": [
+      "rank0_ipv4_and_interface",
+      "shared_address_and_port_for_ranks1_2_3",
+      "manual_address_override"
+    ]
   }
 }

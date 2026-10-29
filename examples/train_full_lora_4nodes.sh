@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# On each node: bash examples/train_full_lora_4nodes.sh NODE_RANK MASTER_IP
+# On each node: bash examples/train_full_lora_4nodes.sh NODE_RANK
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$ROOT/env.sh"
 PYTHON=${PYTHON:-$(command -v python || command -v python3)}
 export NODE_RANK=${1:?Pass node rank 0/1/2/3}
-export MASTER_ADDR=${2:?Pass the rank-0 node IP}
+MASTER_ADDR=${2:-${MASTER_ADDR:-}}
 export NNODES=4 NPROC_PER_NODE=16 MASTER_PORT=${MASTER_PORT:-29500}
 export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
 export OMP_NUM_THREADS=2 CUDA_DEVICE_MAX_CONNECTIONS=32
@@ -18,6 +18,58 @@ OUTPUT_DIR=${OUTPUT_DIR:-$ROOT/.local/full_lora_check}
 ENGRAM_MAP=${ENGRAM_MAP:-$ROOT/.local/full_lora/engram_tokenizer_map.json}
 TRAIN_ITERS=${TRAIN_ITERS:-10}
 [[ $NODE_RANK =~ ^[0-3]$ ]] || { echo 'Node rank must be 0, 1, 2 or 3' >&2; exit 1; }
+
+# Start rank 0 first; other nodes read its address from the shared output directory.
+mkdir -p "$OUTPUT_DIR"
+if [[ $NODE_RANK != 0 && -z $MASTER_ADDR ]]; then
+    echo 'Waiting for the master address on the shared disk...'
+    deadline=$((SECONDS + 120))
+    until [[ -s $OUTPUT_DIR/master_addr ]]; do
+        (( SECONDS < deadline )) || { echo 'Start rank 0 first, using the same shared OUTPUT_DIR.' >&2; exit 1; }
+        sleep 1
+    done
+    read -r MASTER_ADDR MASTER_PORT < "$OUTPUT_DIR/master_addr"
+fi
+read -r node_ip node_iface < <("$PYTHON" - "${MASTER_ADDR:-1.1.1.1}" <<'PYNET'
+import fcntl
+import os
+import socket
+import struct
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    def address(name):
+        request = struct.pack('256s', name.encode()[:15])
+        return socket.inet_ntoa(fcntl.ioctl(sock.fileno(), 0x8915, request)[20:24])
+
+    interface = os.environ.get('HCCL_SOCKET_IFNAME')
+    if interface:
+        ip = address(interface)
+    else:
+        # UDP connect asks the local routing table; it does not send a packet.
+        sock.connect((sys.argv[1], 9))
+        ip = sock.getsockname()[0]
+        for _, name in socket.if_nameindex():
+            try:
+                if address(name) == ip:
+                    interface = name
+                    break
+            except OSError:
+                pass
+    if not interface or ip.startswith('127.') or ip == '0.0.0.0':
+        raise SystemExit('No routable IPv4 interface found; set HCCL_SOCKET_IFNAME to the communication interface.')
+    print(ip, interface)
+PYNET
+)
+export HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME:-$node_iface}
+if [[ $NODE_RANK == 0 ]]; then
+    MASTER_ADDR=${MASTER_ADDR:-$node_ip}
+    address_tmp=$(mktemp "$OUTPUT_DIR/.master_addr.XXXXXX")
+    printf '%s %s\n' "$MASTER_ADDR" "$MASTER_PORT" > "$address_tmp"
+    mv -f "$address_tmp" "$OUTPUT_DIR/master_addr"
+fi
+export MASTER_ADDR MASTER_PORT
+echo "node=$NODE_RANK master=$MASTER_ADDR:$MASTER_PORT interface=$HCCL_SOCKET_IFNAME"
 
 args=(sft
     --model "$MODEL_DIR" --model_type deepseek_v41
