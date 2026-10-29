@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1405" height="660" viewBox="0 0 1405 660"
+     role="img" aria-labelledby="diagram-title diagram-description">
+  <title id="diagram-title">FP8 Current Scaling — 张量缩放与量化示意图</title>
+  <desc id="diagram-description">
+    三条水平数轴依次表示原始张量值、缩放后的数值和转换成 FP8 后的量化值。
+    蓝色点是张量元素，红色点标记幅度最大的负值。
+    粉色梯形说明数值缩放，量化后的点可能重叠在相同的 FP8 表示值上。
+  </desc>
+  <defs>
+    <linearGradient id="scaling-area" x1="0" y1="0" x2="0.18" y2="1">
+      <stop offset="0%" stop-color="#f9cfd2" stop-opacity=".88"/>
+      <stop offset="100%" stop-color="#f4c6ca" stop-opacity=".76"/>
+    </linearGradient>
+    <radialGradient id="blue-grad" cx=".35" cy=".26" r=".89">
+      <stop offset="0%" stop-color="#2c9dff"/>
+      <stop offset="100%" stop-color="#0a84ed"/>
+    </radialGradient>
+    <radialGradient id="red-grad" cx=".36" cy=".27" r=".89">
+      <stop offset="0%" stop-color="#ef4644"/>
+      <stop offset="100%" stop-color="#cc141a"/>
+    </radialGradient>
+    <style>
+      .axis { stroke:#252525; stroke-width:3; stroke-linecap:square; }
+      .zero-tick { stroke:#252525; stroke-width:3.2; }
+      .gray-bracket { fill:none; stroke:#666666; stroke-width:2.5; stroke-linejoin:miter; }
+      .green-bracket { fill:none; stroke:#37b34a; stroke-width:2.5; stroke-linejoin:miter; }
+      .blue-dot { fill:url(#blue-grad); stroke:#168bed; stroke-width:.65; }
+      .red-dot { fill:url(#red-grad); stroke:#bc191e; stroke-width:1.4; }
+      .heading {
+        font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+        font-size:29px; font-weight:700; fill:#171717; text-anchor:middle;
+      }
+      .marker-label {
+        font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+        font-size:28px; font-weight:700; fill:#d72123;
+      }
+      .left-limit {
+        font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+        font-size:24px; font-weight:700; fill:#e02628;
+      }
+      .range-label {
+        font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+        font-size:25px; font-weight:600; fill:#505050;
+      }
+      .zero-label {
+        font-family:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif;
+        font-size:26px; font-weight:700; fill:#222222; text-anchor:middle;
+      }
+    </style>
+  </defs>
+
+  <rect width="1405" height="660" fill="#ffffff"/>
+
+  <!-- Stage 1: original tensor -->
+  <g id="original-tensor">
+    <text class="heading" x="695" y="47">原始张量值</text>
+    <text class="marker-label" x="70" y="87">amax</text>
+    <path class="axis" d="M 40 111.5 H 1348"/>
+    <path class="zero-tick" d="M 693 100 V 123"/>
+    <circle cx="178" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="195" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="230" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="251" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="303" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="475" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="549" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="679" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="993" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="1042" cy="111.5" r="9.3" class="blue-dot"/>
+<circle cx="1175" cy="111.5" r="9.3" class="blue-dot"/>
+    <circle class="red-dot" cx="106.5" cy="111.5" r="11.7"/>
+    <text class="zero-label" x="693" y="153">0</text>
+    <path class="gray-bracket" d="M 106 136 V 155 H 1175 V 136"/>
+    <text class="range-label" x="1218" y="162">原始范围</text>
+  </g>
+
+  <!-- Map the original range into the FP8 range. -->
+  <g id="scaling-transfer">
+    <path d="M 106 163 H 1175 L 984 252 H 341 Z"
+          fill="url(#scaling-area)"/>
+  </g>
+
+  <!-- Stage 2: after per-tensor scaling -->
+  <g id="scaled-tensor">
+    <text class="heading" x="695" y="302">缩放后的数值（适配 FP8 范围）</text>
+    <text class="left-limit" x="231" y="339">−FP8 范围最大值</text>
+    <path class="axis" d="M 40 365.5 H 1348"/>
+    <path class="zero-tick" d="M 693 354 V 376"/>
+    <circle cx="385" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="396" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="415" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="428" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="458" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="562" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="608" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="686" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="876" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="903" cy="365.5" r="9.3" class="blue-dot"/>
+<circle cx="984" cy="365.5" r="9.3" class="blue-dot"/>
+    <circle class="red-dot" cx="340.5" cy="365.5" r="11.7"/>
+    <text class="zero-label" x="693" y="400">0</text>
+    <path class="green-bracket" d="M 340.5 407 V 427 H 1044 V 407"/>
+    <text class="range-label" x="1221" y="425">FP8 范围</text>
+  </g>
+
+  <!-- Stage 3: casting to FP8 groups nearby values onto discrete levels. -->
+  <g id="quantized-tensor">
+    <text class="heading" x="695" y="513">转换为 FP8（量化后的数值）</text>
+    <path class="axis" d="M 40 570.5 H 1348"/>
+    <path class="zero-tick" d="M 693 559 V 582"/>
+    <circle cx="391" cy="565" r="9.3" class="blue-dot"/>
+<circle cx="391" cy="577" r="9.3" class="blue-dot"/>
+<circle cx="422" cy="565" r="9.3" class="blue-dot"/>
+<circle cx="422" cy="577" r="9.3" class="blue-dot"/>
+<circle cx="461" cy="571" r="9.3" class="blue-dot"/>
+<circle cx="566" cy="571" r="9.3" class="blue-dot"/>
+<circle cx="612" cy="571" r="9.3" class="blue-dot"/>
+<circle cx="689" cy="571" r="9.3" class="blue-dot"/>
+<circle cx="891" cy="565" r="9.3" class="blue-dot"/>
+<circle cx="891" cy="577" r="9.3" class="blue-dot"/>
+<circle cx="984" cy="571" r="9.3" class="blue-dot"/>
+    <circle class="red-dot" cx="340.5" cy="570.5" r="11.7"/>
+    <text class="zero-label" x="693" y="608">0</text>
+    <path class="green-bracket" d="M 340.5 613 V 638 H 1044 V 613"/>
+    <text class="range-label" x="1219" y="628">FP8 范围</text>
+  </g>
+</svg>

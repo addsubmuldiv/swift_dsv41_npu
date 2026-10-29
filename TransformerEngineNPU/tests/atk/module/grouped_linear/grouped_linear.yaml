@@ -1,0 +1,172 @@
+name: transformer_engine.pytorch.GroupedLinear
+api: pytorch
+api_type: function_grouped_linear
+# Single route (2026-09-18): the hook generator replaces the curated P0 matrix.
+# GroupedLinear keeps one generator only, so this field and the `atk case -p`
+# argument point at the same file.
+generate: generate_grouped_linear_hook
+backward: false
+standard:
+  acc:
+    grouped_linear_mixed_tolerance:
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+# ---
+# The fields from here on are consumed by the HOOK route.
+# Cases per dtype: the widest dtype pool below has 1 entry (bf16), so this is
+# the case count.
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: keep empty OFF for GroupedLinear — rows=0 (all-zero
+# m_splits) was only NPU-probed; the GPU side goes through NVTE's C++
+# tensor checks, which are expected to reject the null data_ptr of 0-byte
+# CUDA allocations (the §3#28 mechanism in ATK_REPORT), and ATK zeroes a
+# RANDOM dim (in_features=0 untested). infnan stays off (no diff signal).
+extra_numbers: 0
+# Element-scale quota. The default bands (>=10M/100M/1G) are unreachable for
+# these shapes and would burn the reshape-retry budget on every case; the
+# threshold sits in the low-density tail of the inp/dy pool product instead.
+shape_distributions:
+  # 阈值放到尾部（对齐 layernorm.yaml 的 2^32-1 口径）：声明的阈值会被
+  # ATK 按 sum(max_length)/(2^32 x 输入数) 缩放，落回高密度区会让配额立刻溢出、
+  # 进而对所有 tensor 的 max_length 减半，直到某个占位槽跌破其池的最小乘积 →
+  # 无界拒绝循环（2026-09-18 rope 上实测复现）。
+  - [4294967295, 0.4]
+inputs:
+  # ARITY: a GroupedLinear case is `inp, dy, weight_0..g-1, bias_0..g-1,
+  # num_gemms, m_splits, bias_enabled` (2g + 5 slots, g = num_gemms), and the
+  # adapter unpacks them positionally. The native sampler can only create one
+  # slot per declared block, so this schema declares the MAXIMUM arity for
+  # g <= 16 (2 + 16 weights + 16 biases + 3 attrs = 37 slots) and the hook
+  # compacts it down to the 2g + 5 slots each case actually needs. ATK's static
+  # statistics pre-allocate one slot per declared input, so the unused tail
+  # simply reports zero cases.
+  # slot 0 — inp: concatenated local-expert tokens, [tokens, in_features].
+  # in_features comes from here; tokens is the row count m_splits must sum to.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        # 不带 random_types / custom_dist_ratio：前者的正态分布档枚举名会被仓库
+        # codespell/typos 钩子判为拼写错误；后者的 ratio 形状与 values 对不上，
+        # ATK 会在 parameter_tensor.py:68 抛 IndexError。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048, 4096, 8192]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 1 — dy: grad_output. Its SECOND dim is the out_features source (the
+  # weight/bias shapes are derived from it); its first dim is overwritten with
+  # inp's token count by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [256, 512, 1024, 2048]
+      max_length: 8388608
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slots 2..17 — weight_0..weight_15, slots 18..33 — bias_0..bias_15.
+  # 32 minimal placeholders whose shapes are rewritten by the hook to
+  # [out_features, in_features] / [out_features] for the first num_gemms slots.
+  # They exist only so the declared arity can hold the largest case; pinning
+  # them tiny keeps the sampling (and the element quota) cheap.
+  - &per_expert_placeholder
+    type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  - *per_expert_placeholder
+  # slot 34 — num_gemms (number of local experts). Only the real Megatron
+  # values are sampled: num_local_experts = num_experts / ep_size lands on
+  # these, 1 is the KIMI3 single-expert case, 2 the smallest expert-parallel
+  # slice, 8 the mainstream, 16 the top of the declared range. The hook clamps
+  # to [1, min(16, tokens)] so every expert can receive at least one token.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [1, 2, 4, 8, 16]
+  # slot 35 — m_splits STYLE. The adapter wants a comma-separated token split
+  # that sums to inp's row count, but that count is sampled in slot 0 — so the
+  # style is sampled here and the hook renders the actual `m_splits` string from
+  # it (keeping the curated matrix's coverage intent):
+  #   uniform    — even router split
+  #   uneven     — +/-3% sawtooth (load imbalance)
+  #   collapse   — one expert takes ~60% of the tokens (router collapse)
+  #   tiny_tail  — last expert gets ~2% (under-loaded expert)
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [uniform, uneven, collapse, tiny_tail]
+  # slot 36 — bias_enabled (module bias parameter on/off; when off the bias
+  # slots are still present but never consumed).
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

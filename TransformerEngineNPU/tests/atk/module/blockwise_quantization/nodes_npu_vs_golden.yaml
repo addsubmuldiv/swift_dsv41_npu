@@ -1,0 +1,13 @@
+nodes:
+  - backend: npu
+    name: "0"
+    devices: [0]
+    task: [accuracy]
+    output_path: ./atk_blockwise_quantization_output
+  # Golden-free guard: this CPU node loads the CPU-computed reference
+  # artifacts produced by collect_cpu_reference.py. Not an NVTE golden —
+  # NVTE's blockwise kernel requires Hopper (SM90) + CUDA >= 12.9.
+  - backend: cpu
+    name: nvte
+    task: [accuracy_load]
+    output_path: ./blockwise_quantization_reference

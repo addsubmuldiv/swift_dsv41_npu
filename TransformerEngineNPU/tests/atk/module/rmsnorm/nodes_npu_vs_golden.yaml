@@ -1,0 +1,14 @@
+nodes:
+  - backend: npu
+    name: "0"
+    devices: [0]
+    task: [accuracy]
+    output_path: ./atk_rmsnorm_output
+  # Non-executing node for previously saved GPU outputs. Use results from
+  # the same phase, saved inputs and plugin version as the NPU task.
+  # collect_nvte_golden.py exports rmsnorm_cases_offline/<stem>.json and
+  # rmsnorm_goldens/cpu_nvte/<stem>/<case_id>/output_N.pt.
+  - backend: cpu
+    name: nvte
+    task: [accuracy_load]
+    output_path: ./rmsnorm_goldens

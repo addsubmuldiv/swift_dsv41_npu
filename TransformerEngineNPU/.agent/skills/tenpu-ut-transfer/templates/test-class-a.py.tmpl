@@ -1,0 +1,74 @@
+# Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
+# See LICENSE for license information.
+
+"""
+{描述：移植来源 + 覆盖范围}
+上游参考: {上游测试文件}
+
+⚠️  A 类 — FP8/HiF8/MXFP8/W4A8 量化路径，按当前源码能力检测门控。
+"""
+
+import pytest
+import torch
+from utils import (
+    npu_available,
+    assert_close,
+    dtype_tols,
+    to_cpu,
+    make_reference_and_test_tensors,
+)
+from transformer_engine.pytorch.constants import NPUVersion
+from transformer_engine.pytorch.utils import check_npu_version
+
+pytestmark = pytest.mark.skipif(not npu_available(), reason="NPU device is required")
+
+# A5 检测（动态判断，禁止硬编码"本机是 A2"）
+_FP8_READY = check_npu_version(NPUVersion.A5)
+
+
+def _device():
+    return torch.device("npu")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# {测试类名}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class {测试类名}:
+    @staticmethod
+    def setup_method() -> None:
+        torch.manual_seed(42)
+        torch.npu.manual_seed(42)
+
+    # ── FP8 依赖测试（A5 执行，能力不足时明确 skip） ────────────────────────
+    @pytest.mark.skipif(not _FP8_READY, reason="Atlas A5 FP8 capability is required")
+    def test_{方法名}_fp8_roundtrip(self):
+        """FP8 量化-反量化 round-trip：数值在量化容差内恢复。"""
+        x = torch.randn({shape}, dtype=torch.float16, device="cpu").to("npu")
+        q = {量化调用}(x)
+        dq = {反量化调用}(q)
+        assert_close(to_cpu(dq), to_cpu(x), **dtype_tols(torch.float16))
+
+    # ── 非 FP8 测试（所有 NPU 版本都可执行） ─────────────────────────────────
+
+    def test_{方法名}_{场景}(self):
+        """{测试描述}（与硬件无关的路径）"""
+        # 参考值必须独立构造：fp64 CPU ref / 手算公式 / PyTorch native 对照。
+        # 禁止用被测函数自身输出当 expected（循环论证，0 分）。
+        ref, test = make_reference_and_test_tensors(
+            ({张量形状}),
+            test_dtype={dtype},
+            test_device=_device(),
+        )
+        result = {目标调用}(test)
+        expected = {独立参考计算}(ref)
+        assert result.shape == expected.shape, f"shape {result.shape} != {expected.shape}"
+        assert_close(to_cpu(result), to_cpu(expected), **dtype_tols({dtype}))
+
+    def test_{方法名}_扰动输入改变输出(self):
+        """反向断言（每文件 ≥1 条）：输入变化必须反映到输出，防"恒返回常量"的错误实现。"""
+        x1 = torch.zeros(({张量形状}), dtype={dtype}, device="cpu").to("npu")
+        x2 = torch.ones(({张量形状}), dtype={dtype}, device="cpu").to("npu")
+        out1 = {目标调用}(x1).float().cpu()
+        out2 = {目标调用}(x2).float().cpu()
+        assert not torch.equal(out1, out2), "输入扰动后输出未变化，疑似恒真/恒值实现"

@@ -1,0 +1,92 @@
+name: transformer_engine.pytorch.tensor.mxfp8_tensor.MXFP8Tensor
+api: pytorch
+api_type: function_mxfp8_quantization
+generate: default  # 纯 yaml 路线（零跨输入耦合，不需要生成器）
+backward: false
+standard:
+  acc:
+    # Golden-free guard (see module README / REPORT section 4-P2(2)): NVTE's
+    # MXFP8 kernels are SM100-only with no fallback, so the reference is the
+    # CPU-computed artifact set (collect_cpu_reference.py), never an NVTE
+    # golden. Thresholds are the theoretical MXFP8 bounds, not measured ones:
+    #
+    #   rtol 0.125 = 2^-3: e4m3's 3-bit mantissa (2^-4 half-ulp rounding) plus
+    #   one bit of E8M0 scale headroom. Universal for any conforming codec,
+    #   independent of the E8M0 rounding convention (ceil / nearest / floor).
+    #   e5m2's bound is 0.25; the adapter normalizes its emitted tensors by
+    #   the bound factor so this single fp32 rtol is correct for both formats.
+    #   atol 0.0675 mirrors NVTE's own e4m3 test tolerance (subnormal floor).
+    #
+    # Per-output windows (see _comparators.MixedToleranceAccuracy):
+    #   output_2 cross-consistency residual (reference: zeros) is bounded by
+    #     2 * (rtol * range_max + atol) = 2 * (0.125*0.5 + 0.0675) = 0.26;
+    #     range_max := THIS FILE's range upper bound (0.5 below). The window
+    #     is coupled to the declared range: recompute with the same formula
+    #     if the range ever changes — never copy the constant into a config
+    #     with a different range (too wide mis-guards, too narrow misfails).
+    #   output_3/4 scale canonicity: decoded scale within ONE exponent of the
+    #     exact CPU canonical amax/fp8_max -> rtol 1.0, atol 0, all blocks
+    #     (the window covers every legal E8M0 convention; anything off by one
+    #     exponent or more, saturated, or mis-decoded fails).
+    mxfp8_quantization_mixed_tolerance:
+      fp32_rtol: 0.125
+      fp32_atol: 0.0675
+      fp32_required_matched_ratio: 0.99
+      fp32_max_abs_error_limit: 1.0
+      fp32_max_ulp_multiple: 32
+      fp32_atol_output_2: 0.26
+      fp32_max_abs_error_limit_output_2: 0.26
+      fp32_rtol_output_3: 1.0
+      fp32_atol_output_3: 0.0
+      fp32_required_matched_ratio_output_3: 1.0
+      fp32_rtol_output_4: 1.0
+      fp32_atol_output_4: 0.0
+      fp32_required_matched_ratio_output_4: 1.0
+shape_distributions:
+  # 阈值放尾部（对齐 layernorm.yaml 口径）：被缩放回高密度区会触发配额溢出 →
+  # 全 tensor 的 max_length 减半螺线 → 占位槽跌破池最小乘积的无界拒绝循环。
+  - [4294967295, 0.4]
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+extra_numbers: 0
+inputs:
+  # Pure-yaml route (generate: default, no generator file): this module has
+  # zero cross-input coupling (the scale is derived from x inside the
+  # adapter), so the native engine samples these fields directly. The %32
+  # alignment (last dim AND leading-dim product) is guaranteed STRUCTURALLY
+  # by the pool below — every value is a multiple of 32 — and there is no
+  # generation-time guard, so never put a non-multiple back into the pool.
+  # x: high-precision tensor to quantize to MXFP8. Range is kept away from 0
+  #    so every 32-block has amax > 0 (all-zero blocks make any scale legal
+  #    and would defeat the canonicity reference). fp32 is NOT in the pool:
+  #    the npu_dynamic_mx_quant kernel only accepts bf16/fp16 inputs (the
+  #    sibling blockwise kernel npu_dynamic_block_quant does accept fp32 —
+  #    different kernels, different support lists; see GENERALIZATION.md
+  #    dtype table).
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16]
+    ranges:
+      valid:
+        values: [[0.01, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3]
+      # 全部 32 对齐：MXFP8 要求最后维 %32 与前导维乘积 %32 同时成立，用对齐过的
+      # 取值池即可结构性满足（纯 yaml 路线没有生成期守卫）。
+      dim_values:
+        values: [32, 64, 128, 256, 512, 1024]
+      max_length: 8388608
+    boundary:
+      # ATK 的 BoundaryConfig 默认全开，这里显式关死：empty / 0 维 x 没有
+      # 32 块结构（amax/scale 无定义），inf/nan x 使 amax 变 NaN——若开
+      # extra 轨道，这三类都会生成非法用例。
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fp8_format: "e4m3" / "e5m2" selects the FP8 format.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [e4m3, e5m2]

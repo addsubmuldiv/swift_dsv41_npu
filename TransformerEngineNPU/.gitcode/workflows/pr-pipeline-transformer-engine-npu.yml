@@ -1,0 +1,215 @@
+name: PR-pipeline-TransformerEngineNPU
+
+concurrency:
+  enable: true
+  max: 3
+  exceed-action: QUEUE
+  preemption:
+    enable: true
+    events: [mr_id]
+
+# The repository-owned UT entrypoint lives under .gitcode/workflows/scripts.
+on:
+  pr_comment:
+    types: [created]
+    keyword: '^compile$'
+  pull_request_comment:
+    types: [created]
+    branches: ['*']
+    comments: ['^compile$']
+
+permissions:
+  project: read
+  repository: read
+  pr: write
+  note: write
+  id-token: write
+  action: read
+
+env:
+  pr_id: ${{ atomgit.event.pull_request.number || atomgit.event.issue.number }}
+  target_branch: ${{ atomgit.event.pull_request.base.ref || atomgit.base_ref }}
+  org_name: 'Ascend'
+  SCA_PROJECT_NAME: 'MindSpeed'
+  ANTIPOISON_PROJECT_NAME: 'MindSpeed'
+
+stages:
+  only_doc:
+    name: only_doc
+    select: selected_by_default
+    jobs:
+      Detect_file_changes:
+        name: Detect_file_changes
+        runs-on: [self-hosted, default, x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/pytorch_images_x86/pytorchx86:v_03
+        outputs:
+          need_build_ut: ${{ steps.set-skip.outputs.need_build_ut }}
+        steps:
+          - name: checkout
+            uses: checkout
+            with:
+              allow-unsafe-pr-checkout: true
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+              fetch-depth: 0
+          - name: Only_doc_commit
+            id: filter
+            uses: paths-changes-filter
+            with:
+              event-name: 'pull_request'
+              base: ${{ env.target_branch }}
+              repo: ${{ atomgit.repository }}
+              number: ${{ env.pr_id }}
+              token: ${{ atomgit.ATOMGIT_TOKEN }}
+              list-files: json
+              predicate-quantifier: every
+              filters: |
+                changed:
+                  - '**'
+                non-doc:
+                  - '!**/*.md'
+                  - '!**/*.rst'
+                  - '!**/*.log'
+                  - '!**/*.png'
+                  - '!**/*.jpg'
+                  - '!**/*.doc'
+                  - '!**/*.eddx'
+                  - '!**/*.svg'
+          - name: set build skip flag
+            id: set-skip
+            run: |
+              set -eu
+              echo "changed: ${{ steps.filter.outputs.changed_files }}"
+              echo "non-doc: ${{ steps.filter.outputs.non-doc }}"
+              if [ "${{ steps.filter.outputs.non-doc }}" = "true" ]; then
+                echo "need_build_ut=yes" >> "$ATOMGIT_OUTPUT"
+              else
+                echo "need_build_ut=no" >> "$ATOMGIT_OUTPUT"
+              fi
+
+      associate_pr_comment:
+        name: associate_pr_comment
+        select: selected_by_default
+        runs-on: [self-hosted, default, x86, cpu=16]
+        steps:
+          - name: associate-pr-comment
+            uses: associate-pr-comment
+          - name: pre_pipeline
+            id: pre_pipeline
+            uses: cann/.gitcode/actions/pre-pipeline@689551d6b29a77d8c2a005b8f1b3883db24820ef
+            with:
+              owner: ${{ env.org_name }}
+              repo: ${{ atomgit.event.repository.name }}
+              pr_number: ${{ atomgit.event.pull_request.number }}
+              token: ${{ secrets.GIT_TOKEN }}
+              apply_label: 'true'
+              run_url: https://gitcode.com/${{ env.org_name }}/${{ atomgit.event.repository.name }}/actions/runs/${{ atomgit.workflow_run_id }}
+    pre:
+      - type: auto
+    fail-fast: false
+
+  codecheck:
+    name: CodeCheck
+    select: selected_by_default
+    jobs:
+      CodeCheck_pre_commit:
+        name: CodeCheck_pre_commit
+        if: ${{ jobs.Detect_file_changes.outputs.need_build_ut == 'yes' }}
+        runs-on: [self-hosted, default, x86, cpu=16]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/atlas-ci/common:latest
+        steps:
+          - name: checkout
+            uses: checkout
+            with:
+              allow-unsafe-pr-checkout: true
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+          - name: setup-python311
+            run: |
+              set -eu
+              PYTHON311_BIN=$(dirname "$(command -v python3.11)")
+              ln -sf "$(command -v python3.11)" "$PYTHON311_BIN/python"
+              echo "$PYTHON311_BIN" >> "$ATOMGIT_PATH"
+              "$PYTHON311_BIN/python" --version
+          - name: install gitleaks
+            run: |
+              set -eu
+              cd "$ATOMGIT_WORKSPACE"
+              wget --no-host-directories -c --no-check-certificate https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
+              chmod +x gitleaks
+              cd -
+          - name: pre-commit
+            uses: openlibing/pre-commit-action@v1.0.0
+
+      SCA:
+        name: SCA
+        if: ${{ jobs.Detect_file_changes.outputs.need_build_ut == 'yes' }}
+        runs-on: [self-hosted, default, x86, cpu=16]
+        steps:
+          - name: verify service registration
+            run: |
+              set -eu
+              test -n "$SCA_PROJECT_NAME" || { echo 'Set the confirmed SCA service project name.' >&2; exit 1; }
+          - name: checkout
+            uses: checkout
+            with:
+              allow-unsafe-pr-checkout: true
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+          - name: Run SCA PR scan
+            uses: openlibing/sca-action/sca-pr-action@v1.0.0
+            with:
+              project-name: ${{ env.SCA_PROJECT_NAME }}
+
+      Antipoison:
+        name: Antipoison
+        if: ${{ jobs.Detect_file_changes.outputs.need_build_ut == 'yes' }}
+        runs-on: [self-hosted, default, x86, cpu=16]
+        steps:
+          - name: verify service registration
+            run: |
+              set -eu
+              test -n "$ANTIPOISON_PROJECT_NAME" || { echo 'Set the confirmed antipoison service project name.' >&2; exit 1; }
+          - name: checkout
+            uses: checkout
+            with:
+              allow-unsafe-pr-checkout: true
+              ref: refs/merge-requests/${{ env.pr_id }}/merge
+          - name: Run malicious code scan
+            uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
+            with:
+              repository-name: ${{ atomgit.repository }}
+              pr-id: ${{ env.pr_id }}
+              project-name: ${{ env.ANTIPOISON_PROJECT_NAME }}
+    pre:
+      - type: auto
+    fail-fast: false
+
+  developer_test:
+    name: UT
+    select: selected_by_default
+    jobs:
+      UT:
+        name: UT (repository routing)
+        select: selected_by_default
+        if: ${{ jobs.Detect_file_changes.outputs.need_build_ut == 'yes' }}
+        uses: ./.gitcode/workflows/ut_job.yml
+        with:
+          REMOTE_URL: https://gitcode.com/Ascend/TransformerEngineNPU.git
+    pre:
+      - type: auto
+    fail-fast: false
+
+post:
+  jobs:
+    query_pipeline:
+      steps:
+        - name: query_pipeline
+          id: query_pipeline
+          uses: cann/.gitcode/actions/query-pipeline@689551d6b29a77d8c2a005b8f1b3883db24820ef
+          with:
+            owner: ${{ env.org_name }}
+            repo: ${{ atomgit.event.repository.name }}
+            run_id: ${{ atomgit.workflow_run_id }}
+            token: ${{ secrets.GIT_TOKEN }}
+            pr_number: ${{ atomgit.event.pull_request.number }}
+            apply_label: 'true'

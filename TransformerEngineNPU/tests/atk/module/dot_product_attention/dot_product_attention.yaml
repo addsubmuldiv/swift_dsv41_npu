@@ -1,0 +1,184 @@
+name: transformer_engine.pytorch.DotProductAttention
+api: pytorch
+api_type: function_dot_product_attention
+# Dual-route iteration: default = full-build generator
+# (generate_dot_product_attention.py, curated two-tier matrix,
+# golden-compatible; ignores the sampling fields below except query's
+# dtypes). The hook-route candidate lives in generate_dpa_hook.py — to
+# switch, change this field to `generate_dpa_hook` AND pass
+# `-p .../generate_dpa_hook.py` to `atk case`. Once the hook route is
+# validated, generate_dot_product_attention.py gets deleted
+# (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_dpa_hook
+backward: false
+standard:
+  acc:
+    dot_product_attention_mixed_tolerance:
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: DPA cases are large by nature (B×S×H×D tensors
+# plus B×S×H_kv×D key/value). The threshold sits in the pool-product
+# low-density tail. See GENERALIZATION.md §5.3.
+# NOTE: max_length below is a real cap (2^24), not the "无上限" posture some
+# other yamls use — an uncapped DPA pool reaches GB-scale tensors.
+shape_distributions:
+  # 阈值放到尾部（对齐 layernorm.yaml 的 2^32-1 口径）：声明的阈值会被
+  # ATK 按 sum(max_length)/(2^32 x 输入数) 缩放，落回高密度区会让配额立刻溢出、
+  # 进而对所有 tensor 的 max_length 减半，直到某个占位槽跌破其池的最小乘积 →
+  # 无界拒绝循环（rope 上实测复现过）。
+  - [4294967295, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores).
+# 泛化口径（对齐 layernorm.yaml）：三个 dtype x 50 = 150 例/种子。
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: keep empty OFF for DPA — thd empty (T<3) is
+# structurally inexpressible (the adapter derives 3 ragged cu_seqlens
+# sequences from the token count), ATK zeroes a RANDOM dim (H=0/D=0
+# break module init; only sbhd batch/seq=0 was NPU-probed, and the GPU
+# side is unverified — NPU-empty-legal
+# does not imply NVTE-empty-legal). infnan stays off (no diff signal
+# for attention). lower/upper value borders are fine.
+extra_numbers: 0
+inputs:
+  # query — really sampled on the hook route. The pool is deliberately
+  # small-valued (2..256) and includes unaligned entries (3, 4) so the
+  # hook's reconcile (d0 >= 2, d1 % 16, d3 % 8) does real work rather than
+  # being dead safety net. 4-D layout for sbhd; for thd the hook flattens
+  # d0 × d1 into the token count.
+  # Determinism: same yaml + `atk case -s 1234` + same ATK version ⇒
+  # identical cases.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        # 不带 random_types / custom_dist_ratio：前者的正态分布档枚举名会被仓库
+        # codespell/typos 钩子判为拼写错误；后者的 ratio 形状与 values 对不上，
+        # ATK 会在 parameter_tensor.py:68 抛 IndexError。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [4]
+      dim_values:
+        # 两条上界，钩子在下钳（详见 README「已知算子限制」）：
+        #   D > 768         —— 上游 kernel 直接拒绝（EZ0026），钳回 512；sbhd/thd 共用
+        #   thd 另有 16 位 stride 限制 —— N_q·align(D,16) > 65535 时静默算错（fp32 只见反向，
+        #                    fp16/bf16 连前向一起退化），按 8 步下钳 head_dim
+        # 池里的 512 已贴着上界：再大的采样会被钳掉，边界轨就探不到上界了。
+        values: [2, 3, 16, 17, 24, 32, 48, 64, 96, 128, 256, 512]
+      max_length: 16777216
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # key — shape/dtype patched to [B, S, kv_heads, D] in after_case_config.
+  # Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # value — same as key.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy — grad_output seed; range live; shape patched to the output shape:
+  # sbhd → 3-D [B, S, H*D] (NOT query's 4-D shape); thd → 3-D [T, H, D]
+  # (the semantic shape — NVTE's thd return is flattened [T, H*D] and the
+  # adapter canonicalizes it back, see GENERALIZATION.md §3.4). Raw
+  # sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # num_attention_heads — synced from query.shape[2] by the hook.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [4]
+  # kv_channels (head_dim) — synced from query.shape[3] by the hook.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [64]
+  # num_gqa_groups — 0 means MHA (kv_heads = num_heads); a positive
+  # divisor of num_heads means GQA/MQA (kv_heads = gqa). The hook
+  # reconciles non-divisor values to the nearest divisor.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [0, 2, 4, 8]
+  # attn_mask_type: sampled independently of qkv_format, then RECONCILED by
+  # the hook onto the legal set for the sampled format (keeping the causal
+  # bit): sbhd → {causal, no_mask}; thd → {padding, padding_causal}. The
+  # pairing is forced by the golden side — NVTE asserts `"padding" in
+  # attn_mask_type` for thd (dot_product_attention.py:1368), and an sbhd
+  # padding mask would need a mask tensor the adapter never passes.
+  # String attrs must keep an explicit value set — unknown values fail fast.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [causal, no_mask, padding, padding_causal]
+  # qkv_format: "sbhd" (4-D) or "thd" (3-D packed/variable-length).
+  # Only these two: TENPU's DotProductAttention asserts qkv_format ∈
+  # {sbhd, thd} (dot_product_attention.py:645) — `bshd` is documented in
+  # both backends but unimplemented in TENPU.
+  # thd requires cu_seqlens (adapter derives 3 ragged sequences from the
+  # token count) and has NO alignment constraints on NPU
+  # (probe: 12/12 pass).
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [sbhd, thd]

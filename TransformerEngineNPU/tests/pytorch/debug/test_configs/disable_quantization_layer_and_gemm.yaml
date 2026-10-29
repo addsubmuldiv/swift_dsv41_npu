@@ -1,0 +1,16 @@
+test_disable_quantization_layer:
+  enabled: True
+  layers:
+    layer_types: [fc1]
+  transformer_engine:
+    DisableQuantizationLayer:
+      enabled: True
+
+test_disable_quantization_gemm:
+  enabled: True
+  layers:
+    layer_types: [fc2]
+  transformer_engine:
+    DisableQuantizationGEMM:
+      enabled: True
+      gemms: [wgrad]

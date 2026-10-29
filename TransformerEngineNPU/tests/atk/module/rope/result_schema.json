@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "rope": {
+      "output_0.pt": "forward_output",
+      "output_1.pt": "input_grad",
+      "output_2.pt": "api_contract_json_utf8"
+    },
+    "rope_fused_qkv": {
+      "output_0.pt": "q_output",
+      "output_1.pt": "k_output",
+      "output_2.pt": "v_output_passthrough",
+      "output_3.pt": "qkv_input_grad",
+      "output_4.pt": "api_contract_json_utf8"
+    }
+  }
+}

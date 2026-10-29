@@ -1,0 +1,14 @@
+[run]
+concurrency = multiprocessing
+parallel = true
+source = transformer_engine
+omit =
+    # A5 coverage includes FP8/MXFP/W4A8 quantization, tensor/storage, recipe,
+    # and context-parallel implementation paths. Keep only non-NPU Triton code
+    # outside the denominator.
+    transformer_engine/pytorch/triton/*
+
+[report]
+show_missing = true
+omit =
+    transformer_engine/pytorch/triton/*

@@ -1,0 +1,14 @@
+{
+  "_note": "本文件是 .push_config.json 的模板。使用方式：复制为同一目录下的 .push_config.json 并填入你的真实值（.push_config.json 含 API token 凭据，已被 .gitignore 排除，绝不提交）。字段说明：repo.remote_url=个人 MegatronAdaptor 仓 URL；repo.api_token=gitcode API token（建 Issue/PR 与 CI 仓推送认证共用）；repo.author_name+repo.author_email=commit 作者/提交者身份，必须为已签署 gitcode CLA 的账号，否则 PR 的 CLA 检查失败；repo.fork_path=个人 fork 路径 user/MegatronAdaptor（建 PR 用）；ci_repo.remote_url=CI 报告仓 URL；ci_repo.local_dir=CI 报告仓本地 clone 目录（⑨ 推送目标）。",
+  "repo": {
+    "remote_url": "https://gitcode.com/<your_user>/MegatronAdaptor.git",
+    "api_token": "<your_gitcode_api_token>",
+    "author_name": "<your_cla_signed_gitcode_name>",
+    "author_email": "<your_cla_signed_email>",
+    "fork_path": "<your_user>/MegatronAdaptor"
+  },
+  "ci_repo": {
+    "remote_url": "https://gitcode.com/<your_user>/MegatronAdaptorCI.git",
+    "local_dir": "/home/<your_user>/workspace/MegatronAdaptorCI_repo"
+  }
+}

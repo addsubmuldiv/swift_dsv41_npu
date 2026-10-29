@@ -1,0 +1,12 @@
+.local/
+env/
+.venv/
+.install.lock
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.so
+*.o
+.pytest_cache/

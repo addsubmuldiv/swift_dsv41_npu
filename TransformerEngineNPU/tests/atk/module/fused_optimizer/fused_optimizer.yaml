@@ -1,0 +1,149 @@
+name: transformer_engine.pytorch.optimizers.FusedAdam
+api: pytorch
+api_type: function_fused_optimizer
+# Dual-route iteration: default = full-build generator
+# (generate_fused_optimizer.py, curated matrix, golden-compatible;
+# ignores the sampling fields below except params' dtypes). The
+# hook-route candidate lives in generate_fused_optimizer_hook.py — to
+# switch, change this field to `generate_fused_optimizer_hook` AND pass
+# `-p .../generate_fused_optimizer_hook.py` to `atk case`. Once the hook
+# route is validated, generate_fused_optimizer.py gets deleted
+# (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_fused_optimizer_p0
+backward: false
+standard:
+  acc:
+    fused_optimizer_mixed_tolerance:
+      fp32_rtol: 0.0009765625
+      fp32_atol: 1.5258789e-05
+      fp32_required_matched_ratio: 0.99
+      fp32_max_abs_error_limit: 0.01
+      fp32_max_ulp_multiple: 32
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: threshold sits in the pool-product low-density tail;
+# the ATK default (30% >=10M) is unreachable at this scale and burns the
+# full reshape-retry budget — or deadlocks via the cap-halving spiral.
+# See GENERALIZATION.md §5.3 for the design rules.
+shape_distributions:
+  - [1048576, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores —
+# its matrix is fixed). fp32 x 10 keeps a comparable baseline; raise it
+# for sampling volume.
+dtype_numbers: 10
+# Boundary track switch: 0 keeps the default baseline off; tests may flip
+# to 'all'. NOTE (probe 2026-09-16): empty params are legal (optimizer
+# steps no-op cleanly), so tests MAY enable has_empty here; infnan stays
+# off (no diff signal). With the flags below the track yields only
+# lower/upper value-border cases.
+extra_numbers: 0
+inputs:
+  # params — really sampled on the hook route. The API supports any ndim
+  # (probe: 1-4-D pass; optimizer params are 2-D weights in practice, so
+  # the pool below stays 2-D — a sample choice, not an API limit).
+  # Determinism: same yaml + `atk case -s 1234` (CLI default seed) + same
+  # ATK version ⇒ identical cases.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # grads — range live; shape/dtype patched to params'. Raw sampling
+  # pinned minimal (same shape across all steps by case design).
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # optim_type: "adam" / "sgd". String attrs must keep an explicit value
+  # set — ATK's numeric fallback range [-5, 5] does not match their
+  # semantics. Unknown values fail fast at generation.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [adam, sgd]
+  # lr: learning rate, live for both optimizers.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.001, 0.01]
+  # weight_decay: live for both optimizers.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.0, 0.01]
+  # steps: number of optimizer steps the case runs.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [3, 7]
+  # b0: Adam beta0; dead under sgd (placeholder, contract records 0.0).
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.9]
+  # b1: Adam beta1; dead under sgd (placeholder).
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.999]
+  # eps: Adam epsilon; dead under sgd (placeholder).
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.00000001]
+  # momentum: SGD momentum; dead under adam (placeholder, contract
+  # records 0.0). PROBE-verified constraints: negative is unconditionally
+  # illegal; nesterov=True requires momentum > 0 — the hook reconciles
+  # both. The sample set deliberately includes 0.0 so the reconcile path
+  # is exercised routinely.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.0, 0.9]
+  # nesterov: SGD nesterov flag; dead under adam (contract-recorded only).
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

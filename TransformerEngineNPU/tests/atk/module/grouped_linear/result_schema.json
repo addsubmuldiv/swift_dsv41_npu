@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "forward_output",
+    "output_1.pt": "input_grad",
+    "output_2.pt": "weights_grad_concatenated",
+    "output_3.pt": "biases_grad_concatenated_or_empty",
+    "output_4.pt": "api_contract_json_utf8"
+  }
+}

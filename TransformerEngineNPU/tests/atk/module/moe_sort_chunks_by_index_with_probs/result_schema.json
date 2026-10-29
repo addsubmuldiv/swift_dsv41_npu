@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "forward_output",
+    "output_1.pt": "permuted_probs",
+    "output_2.pt": "input_grad",
+    "output_3.pt": "probs_grad",
+    "output_4.pt": "api_contract_json_utf8"
+  }
+}

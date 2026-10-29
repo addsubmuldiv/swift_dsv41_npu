@@ -1,0 +1,81 @@
+name: transformer_engine.pytorch.RMSNorm
+api: pytorch
+api_type: function_rmsnorm_backward
+generate: generate_rmsnorm_hook
+backward: false
+standard:
+  acc: mixed_tolerance_bm
+shape_distributions:
+  - [4294967295, 0.4]
+# Number of ordinary cases per input dtype.
+dtype_numbers: 0
+# Boundary cases are generated separately from ordinary cases.
+extra_numbers: all
+inputs:
+  # x: input tensor; the last dimension is normalized.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        values: [[ -5, 5 ]]
+    shapes:
+      dim_numbers:
+        values: [2, 3, 4]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 4294967295
+    boundary:
+      has_empty: false
+      has_infnan: true
+      has_scalar: false
+      has_upper_border: false
+      has_lower_border: true
+  # dy: gradient tensor; shape and dtype are aligned with x by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # gamma: weight vector; shape and dtype are aligned with x by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[0.5, 1.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # eps: positive numerical stability constant.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.00001, 0.000001, 0.0001]
+  # zero_centered_gamma: use gamma + 1 when enabled.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

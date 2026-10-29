@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "dequantized",
+    "output_1.pt": "raw_fp8",
+    "output_2.pt": "scale_metadata",
+    "output_3.pt": "api_contract_json_utf8"
+  }
+}

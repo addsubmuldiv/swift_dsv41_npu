@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 566" font-family="sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <text x="440" y="32" text-anchor="middle" font-size="20" font-weight="bold" fill="#222">rowwise / columnwise 的三种准备策略（概念示意）</text>
+
+  <!-- ===== 场景 1 ===== -->
+  <text x="20" y="66" font-size="14" font-weight="bold" fill="#333">场景 1</text>
+
+  <text x="20" y="94" font-size="12" font-weight="bold" fill="#1565c0">前向</text>
+  <rect x="90" y="70" width="120" height="40" rx="4" fill="#cfe2f3" stroke="#6d9eeb"/>
+  <text x="150" y="95" text-anchor="middle" font-size="12.5" fill="#333">高精度张量</text>
+
+  <line x1="210" y1="90" x2="248" y2="90" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="250" y="62" width="170" height="56" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="335" y="86" text-anchor="middle" font-size="12.5" fill="#333">量化 kernel</text>
+  <text x="335" y="104" text-anchor="middle" font-size="11.5" fill="#555">rowwise + columnwise</text>
+
+  <line x1="420" y1="90" x2="458" y2="90" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="460" y="62" width="120" height="24" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="520" y="79" text-anchor="middle" font-size="11.5" fill="#333">rowwise 数据</text>
+  <rect x="460" y="94" width="120" height="24" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text x="520" y="111" text-anchor="middle" font-size="11.5" fill="#333">columnwise 数据</text>
+
+  <text x="20" y="154" font-size="12" font-weight="bold" fill="#e69138">反向</text>
+  <rect x="90" y="134" width="490" height="36" rx="4" fill="#ffffff" stroke="#999" stroke-dasharray="5,4"/>
+  <text x="335" y="156" text-anchor="middle" font-size="12" fill="#555">复用前向保存的 columnwise 数据；不需要的 rowwise 可释放</text>
+
+  <text x="620" y="86" font-size="12" fill="#555">columnwise 为反向保存；</text>
+  <text x="620" y="104" font-size="12" fill="#555">原高精度输入存活时增加驻留</text>
+
+  <!-- ===== 场景 2 ===== -->
+  <text x="20" y="212" font-size="14" font-weight="bold" fill="#333">场景 2</text>
+
+  <text x="20" y="240" font-size="12" font-weight="bold" fill="#1565c0">前向</text>
+  <rect x="90" y="216" width="120" height="40" rx="4" fill="#cfe2f3" stroke="#6d9eeb"/>
+  <text x="150" y="241" text-anchor="middle" font-size="12.5" fill="#333">高精度张量</text>
+
+  <line x1="210" y1="236" x2="248" y2="236" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="250" y="214" width="170" height="44" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="335" y="232" text-anchor="middle" font-size="12.5" fill="#333">前向量化 kernel</text>
+  <text x="335" y="250" text-anchor="middle" font-size="11.5" fill="#555">仅 rowwise</text>
+
+  <line x1="420" y1="236" x2="458" y2="236" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="460" y="216" width="120" height="40" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="520" y="241" text-anchor="middle" font-size="12" fill="#333">rowwise 数据</text>
+
+  <text x="20" y="320" font-size="12" font-weight="bold" fill="#e69138">反向</text>
+  <path d="M 150 256 L 150 300 L 248 300" fill="none" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+  <text x="156" y="282" font-size="11.5" fill="#777">反向读取第 2 次</text>
+  <rect x="250" y="278" width="170" height="44" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="335" y="296" text-anchor="middle" font-size="12.5" fill="#333">反向重新量化</text>
+  <text x="335" y="314" text-anchor="middle" font-size="11.5" fill="#555">产出 columnwise</text>
+  <line x1="420" y1="300" x2="458" y2="300" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+  <rect x="460" y="280" width="120" height="40" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text x="520" y="305" text-anchor="middle" font-size="12" fill="#333">columnwise 数据</text>
+
+  <text x="620" y="232" font-size="12" fill="#555">高精度张量读取两次，</text>
+  <text x="620" y="250" font-size="12" fill="#555">增加读取与量化工作</text>
+
+  <!-- ===== 场景 3 ===== -->
+  <text x="20" y="378" font-size="14" font-weight="bold" fill="#333">场景 3</text>
+
+  <text x="20" y="406" font-size="12" font-weight="bold" fill="#1565c0">前向</text>
+  <rect x="90" y="382" width="120" height="40" rx="4" fill="#cfe2f3" stroke="#6d9eeb"/>
+  <text x="150" y="407" text-anchor="middle" font-size="12.5" fill="#333">高精度张量</text>
+
+  <line x1="210" y1="402" x2="248" y2="402" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="250" y="380" width="170" height="44" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="335" y="398" text-anchor="middle" font-size="12.5" fill="#333">前向量化 kernel</text>
+  <text x="335" y="416" text-anchor="middle" font-size="11.5" fill="#555">仅 rowwise</text>
+
+  <line x1="420" y1="402" x2="458" y2="402" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="460" y="382" width="120" height="40" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="520" y="407" text-anchor="middle" font-size="12" fill="#333">rowwise 数据</text>
+
+  <text x="20" y="486" font-size="12" font-weight="bold" fill="#e69138">反向</text>
+  <path d="M 520 422 L 520 444 L 150 444 L 150 461" fill="none" stroke="#555" stroke-width="1.8" stroke-dasharray="5,4" marker-end="url(#arr)"/>
+  <text x="530" y="437" font-size="11.5" fill="#777">前向保存，反向复用</text>
+
+  <rect x="90" y="464" width="120" height="40" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="150" y="489" text-anchor="middle" font-size="12" fill="#333">rowwise 数据</text>
+
+  <line x1="210" y1="484" x2="248" y2="484" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="250" y="462" width="120" height="44" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="310" y="481" text-anchor="middle" font-size="12.5" fill="#333">转置</text>
+  <text x="310" y="499" text-anchor="middle" font-size="11.5" fill="#555">补出 columnwise</text>
+
+  <line x1="370" y1="484" x2="458" y2="484" stroke="#555" stroke-width="1.8" marker-end="url(#arr)"/>
+
+  <rect x="460" y="464" width="120" height="40" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text x="520" y="489" text-anchor="middle" font-size="12" fill="#333">columnwise 数据</text>
+
+  <text x="620" y="476" font-size="12" fill="#555">仅适用于可复用量化数值的格式</text>
+  <text x="620" y="494" font-size="12" fill="#555">标准 MXFP8 不可仅靠转置生成</text>
+
+  <text x="440" y="550" text-anchor="middle" font-size="11" fill="#777">是否支持及实际性能取决于 recipe、模块与后端；不代表速度排序</text>
+</svg>

@@ -1,0 +1,14 @@
+/.vscode
+*.egg-info/
+/.idea/
+/.qoder/
+build/
+dist/
+__pycache__/
+
+
+*.log
+*.out
+/megatron_output/
+/.idea/
+/.qoder/

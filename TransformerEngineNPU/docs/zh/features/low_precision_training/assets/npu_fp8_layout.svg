@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 660" font-family="sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <text x="440" y="32" text-anchor="middle" font-size="20" font-weight="bold" fill="#222">昇腾 NPU：FP8 / MXFP8 张量的内存布局</text>
+
+  <!-- ============================================================ -->
+  <!-- 第一节：FP8（张量级 scale）                                    -->
+  <!-- ============================================================ -->
+  <text x="60" y="64" font-size="14.5" font-weight="bold" fill="#333">FP8（张量级 scale，如 DelayedScaling / CurrentScaling）</text>
+
+  <!-- 推理卡片 -->
+  <rect x="60" y="80" width="360" height="170" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="240" y="108" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#333">推理：仅 rowwise</text>
+
+  <rect x="100" y="128" width="150" height="40" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="175" y="153" text-anchor="middle" font-size="12.5" fill="#333">FP8 数据</text>
+
+  <rect x="272" y="128" width="60" height="40" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="302" y="153" text-anchor="middle" font-size="11" fill="#555">scale</text>
+
+  <text x="240" y="216" text-anchor="middle" font-size="12" fill="#555">一份量化数据 + 1 个标量 scale</text>
+  <text x="240" y="236" text-anchor="middle" font-size="12" fill="#555">即可执行前向 GEMM</text>
+
+  <!-- 训练卡片 -->
+  <rect x="460" y="80" width="360" height="170" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="640" y="108" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#333">训练：两种 usage 共享数据</text>
+
+  <rect x="500" y="122" width="130" height="34" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="565" y="144" text-anchor="middle" font-size="12" fill="#333">FP8 数据 [M, K]</text>
+
+  <path d="M 640 139 C 683 139 683 175 640 175" fill="none" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="692" y="161" font-size="11.5" fill="#555">共享存储视图</text>
+
+  <rect x="500" y="158" width="130" height="34" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text x="565" y="180" text-anchor="middle" font-size="12" fill="#333">转置视图 [K, M]</text>
+
+  <rect x="500" y="200" width="66" height="20" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="533" y="214" text-anchor="middle" font-size="10.5" fill="#555">1 个 scale</text>
+  <text x="578" y="215" font-size="12" fill="#555">数据与转置视图共用 scale</text>
+
+  <!-- ============================================================ -->
+  <!-- 第二节：MXFP8（块量化，E8M0 scale）                            -->
+  <!-- ============================================================ -->
+  <text x="60" y="286" font-size="14.5" font-weight="bold" fill="#333">MXFP8（1×32 / 32×1 方向块量化，E8M0 块 scale）</text>
+
+  <rect x="60" y="302" width="760" height="308" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+
+  <!-- 数据副本 -->
+  <rect x="90" y="326" width="160" height="40" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text x="170" y="343" text-anchor="middle" font-size="12.5" fill="#333">rowwise 数据 y₁</text>
+  <text x="170" y="360" text-anchor="middle" font-size="11.5" fill="#555">[M, K]</text>
+
+  <text x="314" y="357" text-anchor="middle" font-size="11.5" fill="#555">高精度输入</text>
+  <text x="314" y="378" text-anchor="middle" font-size="11.5" fill="#555">沿两轴分别量化</text>
+
+  <rect x="90" y="372" width="160" height="40" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text x="170" y="389" text-anchor="middle" font-size="12.5" fill="#333">columnwise 数据 y₂</text>
+  <text x="170" y="406" text-anchor="middle" font-size="11.5" fill="#555">[M, K]（沿 M 量化）</text>
+
+  <!-- 两种 scale -->
+  <rect x="380" y="326" width="200" height="40" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="480" y="343" text-anchor="middle" font-size="12.5" fill="#333">rowwise E8M0 scale</text>
+  <text x="480" y="360" text-anchor="middle" font-size="11.5" fill="#555">沿 K 每 32 元素块 1 个</text>
+
+  <rect x="380" y="372" width="200" height="40" rx="4" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="480" y="389" text-anchor="middle" font-size="12.5" fill="#333">columnwise E8M0 scale</text>
+  <text x="480" y="406" text-anchor="middle" font-size="11.5" fill="#555">沿 M 每 32 元素块 1 个</text>
+
+  <text x="618" y="348" font-size="12" fill="#555">每个方向独立持有</text>
+  <text x="618" y="366" font-size="12" fill="#555">一份打包 scale</text>
+  <text x="618" y="384" font-size="12" fill="#555">（非共享）</text>
+
+  <!-- ============================================================ -->
+  <!-- 打包 scale 容器细节                                            -->
+  <!-- ============================================================ -->
+  <rect x="90" y="426" width="700" height="176" rx="6" fill="#ffffff" stroke="#d6b656" stroke-dasharray="6,4"/>
+  <text x="440" y="448" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#555">columnwise scale 打包：以 [ceil(M/64), K, 2] 为例（uint8，每个 E8M0 scale 占 1 字节）</text>
+
+  <!-- 左：源张量的一个 64 行组 -->
+  <text x="205" y="470" text-anchor="middle" font-size="11" fill="#555">1 个 64 行组（两个 32 行块）</text>
+  <rect x="135" y="480" width="140" height="24" fill="#cfe2f3" stroke="#6d9eeb"/>
+  <text x="205" y="496" text-anchor="middle" font-size="10.5" fill="#333">行 0–31（32 行块 0）</text>
+  <rect x="135" y="508" width="140" height="24" fill="#cfe2f3" stroke="#6d9eeb"/>
+  <text x="205" y="524" text-anchor="middle" font-size="10.5" fill="#333">行 32–63（32 行块 1）</text>
+  <text x="205" y="550" text-anchor="middle" font-size="11" fill="#555">每列产生 2 个 scale</text>
+  <text x="205" y="566" text-anchor="middle" font-size="11" fill="#555">（各占 1 字节）</text>
+
+  <!-- 中：打包箭头 -->
+  <line x1="288" y1="506" x2="392" y2="506" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="340" y="492" text-anchor="middle" font-size="11" fill="#555">按列成对存放</text>
+
+  <!-- 右：容器网格 [⌈M/64⌉, K, 2]，每格两个独立字节 -->
+  <text x="400" y="470" font-size="11" fill="#555">⌈M/64⌉ 行块组 ↓</text>
+
+  <!-- 行 0 -->
+  <g>
+    <rect x="400" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="412" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="427" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="439" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="456" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="468" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="483" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="495" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="512" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="524" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="539" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="551" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="568" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="580" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="595" y="480" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="607" y="495" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+  </g>
+
+  <!-- 行 1 -->
+  <g>
+    <rect x="400" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="412" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="427" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="439" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="456" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="468" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="483" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="495" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="512" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="524" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="539" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="551" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+
+    <rect x="568" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="580" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₀</text>
+    <rect x="595" y="508" width="24" height="22" fill="#ffe599" stroke="#d6b656"/>
+    <text x="607" y="523" text-anchor="middle" font-size="9.5" fill="#333">s₁</text>
+  </g>
+
+  <text x="632" y="523" font-size="12" fill="#777">…</text>
+
+  <text x="662" y="486" font-size="11" fill="#555">s₀ / s₁ 分属该列</text>
+  <text x="662" y="502" font-size="11" fill="#555">两个 32 行块，</text>
+  <text x="662" y="518" font-size="11" fill="#555">各占 1 字节</text>
+
+  <!-- 列标签（dim1 = K） -->
+  <text x="425" y="548" text-anchor="middle" font-size="10.5" fill="#555">列 0</text>
+  <text x="481" y="548" text-anchor="middle" font-size="10.5" fill="#555">列 1</text>
+  <text x="537" y="548" text-anchor="middle" font-size="10.5" fill="#555">…</text>
+  <text x="593" y="548" text-anchor="middle" font-size="10.5" fill="#555">列 K-1</text>
+
+  <!-- 右下注释（右对齐） -->
+  <text x="778" y="572" text-anchor="end" font-size="11.5" fill="#555">块数向上取整到偶数（不足补 0）；非尾轴方向按两行交织成对重排</text>
+  <text x="778" y="592" text-anchor="end" font-size="11.5" fill="#555">rowwise 容器为 [M, ceil(K/64), 2]；GEMM 按需同时转置数据和 scale 视图</text>
+
+  <text x="440" y="634" text-anchor="middle" font-size="11" fill="#777">双轴量化返回的 y₁、y₂ 均为 [M, K]；分组不同，不是同一份量化数据的转置副本</text>
+</svg>

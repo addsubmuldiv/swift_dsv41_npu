@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "function_rmsnorm_forward": {
+    "output_0.pt": "forward_output",
+    "output_1.pt": "rstdevs",
+    "output_2.pt": "api_contract_json_utf8"
+  },
+  "function_rmsnorm_backward": {
+    "output_0.pt": "input_grad",
+    "output_1.pt": "weight_grad",
+    "output_2.pt": "api_contract_json_utf8"
+  }
+}

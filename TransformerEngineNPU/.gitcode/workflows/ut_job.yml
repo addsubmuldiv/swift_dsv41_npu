@@ -1,0 +1,46 @@
+name: TransformerEngineNPU UT job
+
+on:
+  workflow_call:
+    inputs:
+      REMOTE_URL:
+        description: Repository URL used to load CI scripts from the default branch.
+        required: true
+        type: string
+      pr_id:
+        description: Pull request number whose merge ref is tested.
+        required: false
+        type: string
+        default: ${{ atomgit.event.pull_request.number }}
+      target_branch:
+        description: Pull request target branch used to calculate changed files.
+        required: false
+        type: string
+        default: ${{ atomgit.event.pull_request.base.ref }}
+
+jobs:
+  UT:
+    name: UT (repository routing)
+    # The verified runner provides eight NPUs for the UT suite.
+    runs-on: [self-hosted, npu=8]
+    container:
+      # Exact CP_docker_image from the current CodeArts TE pipeline.
+      image: swr.cn-north-4.myhuaweicloud.com/mindspeed/pr-mindspeed:910b-openeuler24.03-py3.12-torch-2.9.0-aarch64-v2
+    steps:
+      - name: checkout PR merge ref
+        uses: checkout
+        with:
+          allow-unsafe-pr-checkout: true
+          ref: refs/merge-requests/${{ inputs.pr_id }}/merge
+          path: CODE
+          fetch-depth: 0
+      - name: run repository UT
+        run: |
+          set -e
+          cd "${ATOMGIT_WORKSPACE}"
+          git clone -b "${{ atomgit.event.repository.default_branch }}" \
+            "${{ inputs.REMOTE_URL }}" cie
+          bash cie/.gitcode/workflows/scripts/run_ut.sh \
+            "${ATOMGIT_WORKSPACE}" \
+            "${{ inputs.pr_id }}" \
+            "${{ inputs.target_branch }}"

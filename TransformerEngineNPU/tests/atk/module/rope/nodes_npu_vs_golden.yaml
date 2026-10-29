@@ -1,0 +1,12 @@
+nodes:
+  - backend: npu
+    name: "0"
+    devices: [0]
+    task: [accuracy]
+    output_path: ./atk_rope_output
+  # ATK currently has no GPU node type. This non-executing CPU node is only a
+  # compatibility label for NVTE CUDA artifacts produced by collect_nvte_golden.py.
+  - backend: cpu
+    name: nvte
+    task: [accuracy_load]
+    output_path: ./rope_goldens

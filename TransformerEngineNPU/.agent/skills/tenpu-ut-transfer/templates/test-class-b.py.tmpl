@@ -1,0 +1,94 @@
+# Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
+# See LICENSE for license information.
+
+"""
+{描述：移植来源 + 覆盖范围}
+上游参考: {上游测试文件}
+
+⚠️  B 类 — 分布式路径，通过 DistributedTest 多进程启动器（conftest.py 自动拦截）。
+    world_size = {卡数}
+"""
+
+# B-class guardrails:
+# - verify current NPU API signatures before writing calls
+# - pass real process groups (`dist.group.WORLD` or explicit group) — `None` 会被静默降级
+#   为 no-op，测试恒过但没覆盖 HCCL，一律驳回
+# - set device from LOCAL_RANK, but assert semantics with dist.get_rank()/get_world_size()
+# - use rank-distinct inputs and assert collective values, not only shapes
+# - backward 用例的 grad_out 也要按 rank 区分（全 1 梯度的 all-gather 结果恒真）
+# - 自检报告必须写出期望值公式（如何从 rank/world_size 推导）
+# - use reuse_dist_env=False when multiple real HCCL collectives in one class are unstable
+# Full checklist: reference/assertion-guide.md -> B 类 DistributedTest Checklist.
+
+import os
+import pytest
+import torch
+import torch.distributed as dist
+from utils import npu_available, assert_close, dtype_tols, to_cpu
+from distributed_testing import DistributedTest
+
+pytestmark = pytest.mark.skipif(not npu_available(), reason="NPU device is required")
+
+
+def _device():
+    return torch.device("npu")
+
+
+def _set_device_from_local_rank():
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.npu.set_device(local_rank)
+    return local_rank
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# {测试类名}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class {测试类名}(DistributedTest):
+    world_size = {卡数}
+    backend = "hccl"
+    # Prefer isolation for real HCCL collective classes unless remote full-class
+    # validation proves process-pool reuse is stable.
+    reuse_dist_env = False
+
+    @staticmethod
+    def setup_method() -> None:
+        torch.manual_seed(42)
+
+    def test_all_gather_{场景}(self):
+        """AllGather：dim0 按 world_size 翻倍 + 逐 rank 数值可判别。"""
+        _set_device_from_local_rank()
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        group = dist.group.WORLD
+
+        # Rank-distinct input makes real collective behavior observable.
+        x = torch.ones({输入shape}, device="npu") * (rank + 1.0)
+
+        out = {AllGather 调用}(x, process_group=group)  # process_group 必须显式传入
+        torch.npu.synchronize()
+
+        # 期望值公式（自检报告必须写出）：
+        #   out.shape[0] == x.shape[0] * world_size
+        #   out == cat([全 1.0, 全 2.0, ..., 全 world_size], dim=0)（按 rank 序拼接）
+        expected = torch.cat(
+            [torch.ones_like(x) * (r + 1.0) for r in range(world_size)], dim=0
+        )
+        assert out.shape[0] == x.shape[0] * world_size, (
+            f"AllGather 后 dim0 未按 world_size 翻倍: {out.shape} vs {x.shape}"
+        )
+        assert_close(to_cpu(out), to_cpu(expected), **dtype_tols(x.dtype))
+
+    def test_all_reduce_{场景}(self):
+        """AllReduce：期望值 = Σ(rank+1) = world_size·(world_size+1)/2。"""
+        _set_device_from_local_rank()
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        group = dist.group.WORLD
+
+        x = torch.ones({输入shape}, device="npu") * (rank + 1.0)
+        out = {AllReduce 调用}(x, process_group=group)
+        torch.npu.synchronize()
+
+        expected = torch.full_like(x, world_size * (world_size + 1) / 2.0)
+        assert_close(to_cpu(out), to_cpu(expected), **dtype_tols(x.dtype))

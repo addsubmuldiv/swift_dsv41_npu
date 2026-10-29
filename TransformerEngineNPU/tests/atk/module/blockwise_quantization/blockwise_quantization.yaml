@@ -1,0 +1,86 @@
+name: transformer_engine.pytorch.tensor.float8_blockwise_tensor.Float8BlockwiseQTensor
+api: pytorch
+api_type: function_blockwise_quantization
+generate: default  # 纯 yaml 路线（零跨输入耦合，不需要生成器）
+backward: false
+standard:
+  acc:
+    # Golden-free guard (see module README / REPORT section 4-P2(2)): NVTE's
+    # blockwise kernel is TMA / SM90-only, unavailable on the intranet. The
+    # reference is the CPU-computed artifact set (collect_cpu_reference.py).
+    # Thresholds are the same theoretical fp8 round-trip bounds as the MXFP8
+    # module (mantissa rounding dominates; blockwise fp32 scales lose no
+    # E8M0 headroom, so real errors are strictly tighter):
+    #
+    #   rtol 0.125 = 2^-3 (e4m3), 0.25 = 2^-2 (e5m2, normalized by the
+    #   adapter's bound factor so this single fp32 rtol covers both formats);
+    #   atol 0.0675 mirrors NVTE's e4m3 test tolerance.
+    #
+    # Per-output windows:
+    #   output_2 cross-consistency residual (reference: zeros) bounded by
+    #     2 * (rtol * range_max + atol) = 0.26;
+    #   output_3/4 scale canonicity: logical-grid scale vs exact CPU canonical
+    #     amax/fp8_max — a legal scale satisfies s >= canonical (no
+    #     saturation) and any kernel-plausible value is within rtol 1.0 of
+    #     canonical; below-canonical scales saturate the amax element and are
+    #     caught by the round-trip outputs (trap closure documented in the
+    #     MXFP8 README, same argument).
+    blockwise_quantization_mixed_tolerance:
+      fp32_rtol: 0.125
+      fp32_atol: 0.0675
+      fp32_required_matched_ratio: 0.99
+      fp32_max_abs_error_limit: 1.0
+      fp32_max_ulp_multiple: 32
+      fp32_atol_output_2: 0.26
+      fp32_max_abs_error_limit_output_2: 0.26
+      fp32_rtol_output_3: 1.0
+      fp32_atol_output_3: 0.0
+      fp32_required_matched_ratio_output_3: 1.0
+      fp32_rtol_output_4: 1.0
+      fp32_atol_output_4: 0.0
+      fp32_required_matched_ratio_output_4: 1.0
+shape_distributions:
+  # 阈值放尾部（对齐 layernorm.yaml 口径）：被缩放回高密度区会触发配额溢出 →
+  # 全 tensor 的 max_length 减半螺线 → 占位槽跌破池最小乘积的无界拒绝循环。
+  - [4294967295, 0.4]
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+extra_numbers: 0
+inputs:
+  # Pure-yaml route (generate: default, no generator file): this module has
+  # zero cross-input coupling (the scale is derived from x inside the
+  # adapter), so the native engine samples these fields directly. The %128
+  # alignment (last dim AND leading-dim product) is guaranteed STRUCTURALLY
+  # by the pool below — every value is a multiple of 128 — and there is no
+  # generation-time guard, so never put a non-multiple back into the pool.
+  # x: high-precision tensor to quantize with 128x128 blockwise scaling.
+  #    Range kept away from 0 so every tile has amax > 0.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        values: [[0.01, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3]
+      # 全部 128 对齐：blockwise 要求最后维 %128 与前导维乘积 %128 同时成立，用
+      # 对齐过的取值池即可结构性满足（纯 yaml 路线没有生成期守卫）。
+      dim_values:
+        values: [128, 256, 512, 1024]
+      # cap 放大到 2^25：dim 池全是 128 的倍数，3 维组合的最小乘积就有 2.1M，
+      # cap 太小会让"合法乘积"的密度过低 → 形状解析在 300s 内撞不出合法形状。
+      max_length: 33554432
+    boundary:
+      # ATK 的 BoundaryConfig 默认全开，这里显式关死：empty / 0 维 x 没有
+      # 128x128 tile 结构（amax/scale 无定义），inf/nan x 使 amax 变 NaN——
+      # 若开 extra 轨道，这三类都会生成非法用例。
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fp8_format: "e4m3" / "e5m2" selects the FP8 format.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [e4m3, e5m2]

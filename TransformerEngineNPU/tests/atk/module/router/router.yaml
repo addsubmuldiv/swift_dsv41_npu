@@ -1,0 +1,197 @@
+name: transformer_engine.pytorch.router
+api: pytorch
+api_type: function_router
+# Single route (2026-09-18): the hook generator replaces the curated P0 matrix.
+# Router keeps one generator only, so this field and the `atk case -p`
+# argument point at the same file.
+generate: generate_router_hook
+backward: false
+standard:
+  acc:
+    # Standard mixed tolerance. The router chain is elementwise + topk + a
+    # few reductions - no GEMMs - so cross-implementation noise is small,
+    # but the sigmoid/sqrtsoftplus normalizations divide by near-zero sums
+    # on adversarial rows and the aux-loss chain is a scalar product of
+    # batch sums (near-zero cancellation family, REPORT atk 3#11/#14).
+    # Selection outputs are canonicalized index-free
+    # in the adapter (row-sorted, see function_router._canonical_rows) so an
+    # exact top-k tie breaking differently on the two backends is not a
+    # false positive; the routing_map slot carries the probs * routing_map
+    # product row-sorted instead of the bool map (a sorted bool map would be
+    # a pure popcount pattern), and the uint8 contract
+    # is still compared exactly (integers), outside this gate. grad_logits
+    # stays positional; fp32 selection inputs are row-separated before the
+    # call (function_router._separate_rows, bit-reproducible across devices)
+    # so boundary ties cannot flip selection — residual rare ties (bias
+    # sums, per>=2 group-score sums) rely on this gate's abs-error backstop.
+    router_mixed_tolerance:
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+      fp32_rtol: 0.0009765625
+      fp32_atol: 0.000015258789
+      fp32_required_matched_ratio: 0.99
+      fp32_max_abs_error_limit: 0.01
+      fp32_max_ulp_multiple: 32
+# ---
+# The fields from here on are consumed by the HOOK route.
+# Cases per dtype: the widest dtype pool below has 3 entries (t0), so this
+# yields 150 cases per seed (泛化口径，对齐 layernorm.yaml).
+dtype_numbers: 50
+# Boundary track: keep empty OFF for router — E=0 is illegal outright (a
+# 0-expert logits tensor has no defined top-k) and ATK zeroes a RANDOM dim;
+# T=0 was only NPU-probed (GPU unverified — the §3#28 lesson in
+# ATK_REPORT). infnan stays off (no diff signal).
+extra_numbers: 0
+# Element-scale quota. The default (30% >= 10M) is unreachable under the
+# 1M max_length below and would burn the reshape-retry budget every case; the
+# threshold sits in the low-density tail of the pool product instead.
+shape_distributions:
+  # 阈值放到尾部（对齐 layernorm.yaml 的 2^32-1 口径）：声明的阈值会被
+  # ATK 按 sum(max_length)/(2^32 x 输入数) 缩放，落回高密度区会让配额立刻溢出、
+  # 进而对所有 tensor 的 max_length 减半，直到某个占位槽跌破其池的最小乘积 →
+  # 无界拒绝循环（2026-09-18 rope 上实测复现）。
+  - [4294967295, 0.4]
+inputs:
+  # slot 0 — t0: logits [T, E] (topk / score) or probs [T, E] (aux_loss).
+  # Both dims are sampled from the same pool; T*E is bounded by max_length.
+  # The dtype split is 50/50 by construction: ATK enumerates every dtype value
+  # dtype_numbers times (parameter_tensor.py: 每个 dtype 达到 dtype_numbers 个),
+  # so `weights` here would be ignored — do not add one and expect an effect.
+  # Low-precision dtypes stay in the pool because the fp32-upcast / low-precision
+  # cast boundaries are worth covering, but a SPARSE selection is not comparable
+  # across backends at any finite precision (identical logits let the two top-k
+  # implementations pick different experts, and routing_map is compared exactly)
+  # — the hook forces every non-fp32 selection case to a dense topk == E, where
+  # no boundary exists.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        # 不带 random_types / custom_dist_ratio：前者的正态分布档枚举名会被仓库
+        # codespell/typos 钩子判为拼写错误；后者的 ratio 形状与 values 对不上，
+        # ATK 会在 parameter_tensor.py:68 抛 IndexError。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [8, 16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 8388608
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 1 — t1: expert_bias [E] (topk, sigmoid/sqrtsoftplus only), dead input
+  # (score), tokens_per_expert seed (aux_loss). Shape is patched to [E] by the
+  # hook; the raw sampling below is a minimal placeholder.
+  # The RANGE is live and load-bearing: the adapter derives `bias_enabled` from
+  # `t1[0] > 0`, so an all-positive interval covers the expert_bias branch and
+  # an all-negative one covers its absence — both deterministically. A range
+  # straddling zero would leave that switch to luck.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[0.1, 0.6], [-0.6, -0.1]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 2 — g0: grad seed; shape patched to [T, E] (topk / score) or [1]
+  # (aux_loss). Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 3 — g1: dead in all three variants (the adapter seeds the backward
+  # with g0 only); kept so the declared arity matches the adapter's 9
+  # positional inputs. Shape patched to mirror g0.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 4 — variant. String attrs must keep an explicit value set; unknown
+  # values fail fast in the hook.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [topk, score, aux_loss]
+  # slot 5 — score_function; dead input for aux_loss (the hook keeps whatever
+  # was sampled). TENPU's router raises on anything outside this set.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [softmax, sigmoid, sqrtsoftplus]
+  # slot 6 — a2: use_pre_softmax (topk) or topk (score / aux_loss). One sampled
+  # integer serves both roles: the hook forces the dtype per variant and reads
+  # the bool role off its parity (even → True), the int role off its value
+  # (clamped into [1, E]). Keep the pool positive so the int role is always a
+  # legal top-k.
+  - type: attr
+    dtypes:
+      values: [attr_bool, int]
+    ranges:
+      valid:
+        values: [1, 2, 3, 4, 6, 8]
+  # slot 7 — a3: topk (topk variant) or coeff (aux_loss) or dead (score).
+  # Same trick: the int role is clamped to [1, E], the float role is used
+  # as-is (a positive coefficient — 0 would zero the loss and its gradient).
+  - type: attr
+    dtypes:
+      values: [int, float]
+    ranges:
+      valid:
+        values: [1, 2, 3, 4, 6, 8]
+  # slot 8 — a4: packed group-limited routing, `(num_groups << 8) | group_topk`
+  # (topk variant only). The pool holds candidate GROUP COUNTS; the hook
+  # reconciles to a divisor of E, reconciles group_topk to the largest divisor
+  # of topk not exceeding it (the GPU kernel requires topk % group_topk == 0,
+  # falling back to plain top-k when no divisor fits the selection window),
+  # and packs the pair, because the adapter raises on an unpaired
+  # groups/group_topk encoding. 0 = plain top-k.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [0, 2, 4, 8]

@@ -1,0 +1,23 @@
+{
+  "_note": "分支配套唯一权威来源，新增/调整分支只改这里。",
+  "branch_combos": [
+    {
+      "megatron_branch": "main",
+      "ma_branch": "main",
+      "te_branch": "main",
+      "conda_env": "ma_agent_py312"
+    },
+    {
+      "megatron_branch": "core_r0.18.0",
+      "ma_branch": "core_r0.18.0",
+      "te_branch": "main",
+      "conda_env": "ma_agent_py312"
+    },
+    {
+      "megatron_branch": "core_r0.17.0",
+      "ma_branch": "core_r0.17.0",
+      "te_branch": "main",
+      "conda_env": "ma_agent_py312"
+    }
+  ]
+}

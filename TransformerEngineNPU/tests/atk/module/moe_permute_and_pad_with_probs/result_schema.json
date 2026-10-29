@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "forward_output",
+    "output_1.pt": "permuted_probs",
+    "output_2.pt": "inp_grad",
+    "output_3.pt": "row_id_map",
+    "output_4.pt": "pad_offsets",
+    "output_5.pt": "target_tokens_per_expert",
+    "output_6.pt": "api_contract_json_utf8"
+  }
+}

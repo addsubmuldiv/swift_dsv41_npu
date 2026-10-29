@@ -1,0 +1,216 @@
+name: transformer_engine.pytorch.LayerNormMLP
+api: pytorch
+api_type: function_layernorm_mlp
+# Single route: the hook generator is the only route, so this field and the
+# `atk case -p` argument point at the same file.
+generate: generate_layernorm_mlp_hook
+backward: false
+standard:
+  acc:
+    layernorm_mlp_mixed_tolerance:
+      # 判决域 = 数据流槽（o0 前向 / o1 输入梯度）。参数梯度槽不产出：
+      # 不在 Megatron-LM 调用路径，且批量求和对 golden 不可判。
+      # 恢复：适配器加回参数梯度槽 + golden 重采；
+      # 参数梯度 kernel 覆盖在 standalone layernorm / linear /
+      # layernorm_linear 守卫 + pytorch sanity。
+      bf16_rtol: 0.05
+      bf16_atol: 0.05
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+      # fp16 镜像 bf16 套组（比较器默认 2-ULP 相对门对双层 GEMM 链过紧）。
+      fp16_rtol: 0.05
+      fp16_atol: 0.05
+      fp16_required_matched_ratio: 0.99
+      fp16_max_abs_error_limit: 1.0
+      fp16_max_ulp_multiple: 32
+      # fp32 不配键：默认阈值在钳后采样域已验证绿。
+      # o1 近零救援：rsigma 放大的相消噪声；o0 由 golden 侧 fp64 物化链
+      # 基线守护（function 侧 exact_baselines），不依赖阈值键。
+      bf16_atol_output_1: 32.0
+      bf16_max_abs_error_limit_output_1: 64.0
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: empty / 0-D inputs are UNTESTED here — keep every flag off.
+extra_numbers: 0
+# Element-scale quota: threshold in the low-density tail (see GENERALIZATION §5.3).
+shape_distributions:
+  - [4294967295, 0.4]
+inputs:
+  # x: the only really sampled tensor; every other tensor hangs off it (see the
+  # hook). Last dim = hidden_size.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2, 3, 4]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy: grad_output (same shape as x). Derived by the hook; placeholder.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # layer_norm_weight [hidden] — canonical values around 1. Derived by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[0.5, 1.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # layer_norm_bias [hidden] (dead for RMSNorm). Derived by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fc1_weight [ffn, hidden]. Its placeholder is the ffn SOURCE for the hook
+  # (the free dimension of this module); the final shape is written by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [64, 128, 256, 512, 1024, 2048, 4096]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fc1_bias [ffn] (dead when bias is off). Derived by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fc2_weight [hidden, ffn]. Derived by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # fc2_bias [hidden] (dead when bias is off). Derived by the hook.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # eps — numerical stability constant. Explicit enum: ATK's numeric fallback
+  # [-5, 5] would include negative values (NaN trap documented in the norm
+  # modules).
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        # 十进制写法，不要用 1e-05 —— PyYAML 不把无小数点的科学计数法当浮点，
+        # 会解析成字符串，物化期报 "Input 1e-05 is invalid."
+        values: [0.00001, 0.000001, 0.0001]
+  # normalization.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [LayerNorm, RMSNorm]
+  # activation.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [gelu, silu]
+  # bias: linear bias on/off (both fc layers).
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # zero_centered_gamma.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="220" viewBox="0 0 900 220" font-family="Segoe UI, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+  <defs>
+    <marker id="arrowhead-cast" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 10 3, 0 6" fill="#616161"/>
+    </marker>
+  </defs>
+
+  <rect width="900" height="220" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text x="450" y="30" text-anchor="middle" font-size="18" font-weight="600" fill="#212121">FP8 量化</text>
+
+  <!-- 高精度张量 -->
+  <rect x="80" y="80" width="140" height="70" rx="6" fill="#ede7f6" stroke="#673ab7" stroke-width="2"/>
+  <text x="150" y="110" text-anchor="middle" font-size="14" fill="#212121">高精度</text>
+  <text x="150" y="130" text-anchor="middle" font-size="14" fill="#212121">张量</text>
+
+  <!-- 箭头 1 -->
+  <path d="M 220 115 L 270 115" stroke="#616161" stroke-width="2" fill="none" marker-end="url(#arrowhead-cast)"/>
+
+  <!-- 量化容器 -->
+  <rect x="270" y="60" width="330" height="130" rx="6" fill="#e8f5e9" stroke="#66bb6a" stroke-width="2"/>
+  <text x="435" y="205" text-anchor="middle" font-size="14" font-weight="600" fill="#212121">量化</text>
+
+  <!-- 子步骤 1：计算 amax -->
+  <rect x="280" y="95" width="140" height="50" rx="4" fill="#e1f5fe" stroke="#039be5" stroke-width="2"/>
+  <text x="350" y="118" text-anchor="middle" font-size="14" font-weight="600" fill="#212121">计算 amax</text>
+  <text x="350" y="160" text-anchor="middle" font-size="14" fill="#757575">1 次张量读取</text>
+
+  <!-- 箭头 2 -->
+  <path d="M 420 120 L 450 120" stroke="#616161" stroke-width="2" fill="none" marker-end="url(#arrowhead-cast)"/>
+
+  <!-- 子步骤 2：应用缩放 + 转换 -->
+  <rect x="450" y="95" width="140" height="50" rx="4" fill="#e8f5e9" stroke="#66bb6a" stroke-width="2"/>
+  <text x="520" y="115" text-anchor="middle" font-size="14" font-weight="600" fill="#212121">应用缩放</text>
+  <text x="520" y="130" text-anchor="middle" font-size="14" font-weight="600" fill="#212121">+ 转换</text>
+  <text x="520" y="160" text-anchor="middle" font-size="14" fill="#757575">1 次张量读取</text>
+
+  <!-- 箭头 3 -->
+  <path d="M 600 115 L 650 115" stroke="#616161" stroke-width="2" fill="none" marker-end="url(#arrowhead-cast)"/>
+
+  <!-- FP8 张量 -->
+  <rect x="650" y="80" width="140" height="70" rx="6" fill="#fff8e1" stroke="#ffa726" stroke-width="2"/>
+  <text x="720" y="110" text-anchor="middle" font-size="14" fill="#212121">FP8</text>
+  <text x="720" y="130" text-anchor="middle" font-size="14" fill="#212121">张量</text>
+</svg>

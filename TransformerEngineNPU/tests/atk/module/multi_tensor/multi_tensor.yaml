@@ -1,0 +1,132 @@
+name: transformer_engine.pytorch.optimizers.multi_tensor_scale
+api: pytorch
+api_type: function_mt
+# Dual-route iteration: default = full-build generator
+# (generate_multi_tensor.py, curated two-tier matrix, golden-compatible;
+# ignores the sampling fields below except t0's dtypes). The hook-route
+# candidate lives in generate_multi_tensor_hook.py — to switch, change
+# this field to `generate_multi_tensor_hook` AND pass
+# `-p .../generate_multi_tensor_hook.py` to `atk case`. Once the hook
+# route is validated, generate_multi_tensor.py gets deleted
+# (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_multi_tensor_p0
+backward: false
+standard:
+  acc:
+    multi_tensor_mixed_tolerance:
+      fp32_rtol: 0.0009765625
+      fp32_atol: 1.5258789e-05
+      fp32_required_matched_ratio: 0.99
+      fp32_max_abs_error_limit: 0.01
+      fp32_max_ulp_multiple: 32
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: threshold sits in the pool-product low-density tail;
+# the ATK default (30% >=10M) is unreachable at this scale and burns the
+# full reshape-retry budget — or deadlocks via the cap-halving spiral.
+# See GENERALIZATION.md §5.3 for the design rules.
+shape_distributions:
+  - [1048576, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores —
+# its matrix is fixed). dtypes [fp32] x 10 keeps a comparable baseline;
+# raise it (e.g. 50) for sampling volume.
+dtype_numbers: 10
+# Boundary track switch: 0 keeps the default baseline off; tests may flip
+# to 'all'. NOTE (probe 2026-09-16): empty inputs are fully legal for all
+# three ops (any zero dim), so tests MAY enable has_empty here; infnan
+# stays off (no diff signal). With the flags below the track yields only
+# lower/upper value-border cases.
+extra_numbers: 0
+inputs:
+  # t0 — really sampled on the hook route. The API supports any ndim
+  # (probe: 1-4-D all pass, elementwise) and empty inputs; the [2, 3]
+  # pool below is a sample choice matching the curated coverage (real
+  # usage is optimizer grads / weights at 2-3-D), not an API limit.
+  # Determinism: same yaml + `atk case -s 1234` (CLI default seed) + same
+  # ATK version ⇒ identical cases.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # t1 — range live; shape/dtype patched to t0's (equal-shape is the
+  # case-design convention; the API itself accepts mixed shapes in the
+  # list). Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # t2 — same as t1.
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # op: "scale" / "scale_tensor" / "l2norm". String attrs must keep an
+  # explicit value set — ATK's numeric fallback range [-5, 5] does not
+  # match their semantics. Unknown values fail fast at generation.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [scale, scale_tensor, l2norm]
+  # scale: scaling factor for scale/scale_tensor; dead parameter under
+  # l2norm (adapter ignores it). Values mirror the curated matrix tiers.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.0001, 0.1, 0.5, 2.0]
+  # per_tensor: return per-tensor norms; live under l2norm only (dead
+  # parameter for scale ops).
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # chunk_size: NVTE kernel chunking param — ignored on NPU, does not
+  # affect numerics. Kept at the curated value 128.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [128]

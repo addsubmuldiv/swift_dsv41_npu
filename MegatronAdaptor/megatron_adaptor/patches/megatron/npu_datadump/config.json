@@ -1,0 +1,30 @@
+{
+    "task": "statistics",
+    "dump_path": "./dump_path",
+    "rank": [0],
+    "step": [0],
+    "level": "L1",
+    "async_dump": false,
+    "extra_info": true,
+    "statistics": {
+        "scope": [],
+        "list": [],
+        "tensor_list": [],
+        "data_mode": ["all"],
+        "summary_mode": "statistics",
+        "slice": [],
+        "request_id": ""
+    },
+    "tensor": {
+        "scope": [],
+        "list": [],
+        "data_mode": ["all"],
+        "summary_mode": "statistics"
+    },
+    "nan_check": {
+        "scope": [],
+        "list": [],
+        "tensor_list": [],
+        "data_mode": ["all"]
+    }
+}

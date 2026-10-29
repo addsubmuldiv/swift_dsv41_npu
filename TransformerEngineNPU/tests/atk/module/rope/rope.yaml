@@ -1,0 +1,160 @@
+name: transformer_engine.pytorch.attention.apply_rotary_pos_emb
+api: pytorch
+api_type: function_rope
+# Single route (2026-09-18): the hook generator replaces the curated P0 matrix.
+# RoPE keeps one generator only, so this field and the `atk case -p` argument
+# point at the same file.
+generate: generate_rope_hook
+backward: false
+standard:
+  acc:
+    # Mixed tolerance (REPORT atk 3#11 recommendation, confirmed by the
+    # 2026-08-29 golden run): rope forward/grad slots carry near-zero elements
+    # whose relative errors explode, which the single-benchmark mare max gate
+    # cannot absorb. The ULP backstop keeps a real fused-backward divergence
+    # (3#10 family) failing hard, so switching does not mask real bugs.
+    rope_mixed_tolerance:
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+# ---
+# The fields from here on are consumed by the HOOK route.
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: keep empty OFF for RoPE — thd empty (T<3) cannot derive
+# the 3 ragged cu_seqlens segments, head_dim 0 leaves the freqs half-width
+# empty (the adapter mirrors it to rebuild freqs), ATK zeroes a RANDOM dim
+# (H=0 untested), and only S=0/B=0 was NPU-probed (GPU unverified — the
+# §3#28 lesson in ATK_REPORT: NPU-empty-legal does not imply
+# NVTE-empty-legal). infnan stays off (no diff signal).
+extra_numbers: 0
+# Element-scale quota. The default bands (>=10M/100M/1G) rarely apply to these
+# shapes and would burn the reshape-retry budget; the threshold sits in the
+# low-density tail of the 4-D shape product instead.
+shape_distributions:
+  # 阈值放到尾部（对齐 layernorm.yaml 的 2^32-1 口径）：声明的阈值会被
+  # ATK 按 sum(max_length)/(2^32 x 输入数) 缩放，落回高密度区会让配额立刻溢出、
+  # 进而对所有 tensor 的 max_length 减半，直到某个占位槽跌破其池的最小乘积 →
+  # 无界拒绝循环（2026-09-18 rope 上实测复现）。
+  - [4294967295, 0.4]
+inputs:
+  # ARITY is fixed at 8 — but the SLOT MEANINGS differ per variant (dispatch on
+  # slot 4, the same union layout the curated matrix used):
+  #
+  #   slot                rope (apply_rotary_pos_emb)   rope_fused_qkv
+  #   0                   t [s,b,h,d] / [b,s,h,d] / thd [T,h,d]
+  #                                                      qkv [s,b,ng,(np/ng+2)*hn]
+  #   1                   freqs [s,1,1,d/2] fp32         q_freqs [s,1,1,hn] fp32
+  #   2                   dy  (t's shape)                k_freqs [s,1,1,hn] fp32
+  #   3                   "rope"   <- variant goes here dy  (qkv's shape)
+  #   4                   tensor_format                  "rope_fused_qkv"  <- here
+  #   5                   interleaved                    tensor_format
+  #   6                   fused (bool)                   interleaved
+  #   7                   cu_seqlens (str, "none" off thd) qkv_split_arg_list
+  #
+  # This schema declares the union: slots 0-3 are tensors (slot 3 is only used by
+  # the fused variant — the hook drops it for the plain one and the variant attr
+  # takes its place), slots 4-7 are attrs. Slot 7 is a bool for the plain variant
+  # and gets REPLACED by a constructed split attr for the fused one.
+  # slot 0 — t / qkv. All four dims are sampled from one pool: for `rope` they
+  # are (s,b,h,d) or (b,s,h,d); for the fused variant dim 2 is the KV-group count
+  # ng and the LAST dim is the fused width, from which heads-per-group is derived
+  # and the width rewritten to (np/ng + 2) * hn.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        # 不带 random_types / custom_dist_ratio：前者的正态分布档枚举名会被仓库
+        # codespell/typos 钩子判为拼写错误；后者的 ratio 形状与 values 对不上，
+        # ATK 会在 parameter_tensor.py:68 抛 IndexError。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [4]
+      # plain 形态的最后一维就是 head_dim，其 rot_dim = head_dim/2 受 NPU
+      # npu_rotary_mul half 模式上限约束（REPORT atk 3#18）；1024 -> rot_dim 512，
+      # 仍在安全区，2048 及以上会触发该约束，故不入池。
+      dim_values:
+        values: [2, 3, 16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slot 1 — freqs / q_freqs. For `rope` the shape is derived from t (the
+  # sampled value is discarded); for the fused variant its LAST dim is the
+  # head_dim source, hence the {64,128} pool (the de-facto LLM head dims, and
+  # far below the REPORT 3#18 rot_dim cap for npu_rotary_mul half mode).
+  - type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [64, 128]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # slots 2 and 3 — placeholders. Slot 2 is dy for `rope` and k_freqs for the
+  # fused variant; slot 3 is dropped for `rope` and is dy for the fused one.
+  # Both shapes are derived by the hook; the sampled values only feed the
+  # element-quota accounting, so they are pinned minimal.
+  - &rope_placeholder
+    type: tensor
+    dtypes:
+      values: [fp32]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  - *rope_placeholder
+  # slot 4 — variant. String attrs must keep an explicit value set; unknown
+  # values fail fast in the hook.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [rope, rope_fused_qkv]
+  # slot 5 — tensor_format. The fused variant rejects "thd" (TENPU asserts it in
+  # apply_fused_qkv_rotary_pos_emb), so the hook reconciles it back to sbhd there.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [sbhd, bshd, thd]
+  # slot 6 — interleaved (both variants).
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # slot 7 — fused (plain variant only). For `rope`, thd forces it True ("thd is
+  # only supported when fused is True"); for the fused variant the hook replaces
+  # this slot with a constructed qkv_split_arg_list attr derived from the shapes.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

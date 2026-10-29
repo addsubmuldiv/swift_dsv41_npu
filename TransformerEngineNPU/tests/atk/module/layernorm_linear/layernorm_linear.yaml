@@ -1,0 +1,199 @@
+name: transformer_engine.pytorch.LayerNormLinear
+api: pytorch
+api_type: function_layernorm_linear
+# Dual-route iteration: default = full-build generator
+# (generate_layernorm_linear.py, curated two-tier matrix, golden-compatible;
+# ignores the sampling fields below except x's dtypes). The hook-route
+# candidate lives in generate_layernorm_linear_hook.py — to switch, change
+# this field to `generate_layernorm_linear_hook` AND pass
+# `-p .../generate_layernorm_linear_hook.py` to `atk case`. Once the hook
+# route is validated, generate_layernorm_linear.py gets deleted
+# (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_layernorm_linear_p0
+backward: false
+standard:
+  acc:
+    layernorm_linear_mixed_tolerance:
+      # Standard 2-ULP thresholds (0.0156). The previous 0.05 covered the
+      # real-tier parameter grads of the pre-fp32-stats code (bf16 norm
+      # statistics + hand-written composite, ~1% pipeline noise). After the
+      # fp32-stats fix the standalone layernorm guard closes at 10/10 on
+      # 0.0156 (2026-08-31, REPORT atk 3#16) and layernorm_mlp's LN param
+      # grads already pass at 0.0156 rtol with only the near-zero abs
+      # rescue, so this module re-tightens to the standard gate too. If the
+      # real-tier param grads land between 0.99 and the old measurements,
+      # add per-output overrides (bf16_atol_output_N) following the
+      # layernorm_mlp pattern rather than raising the module default.
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: threshold sits in the pool-product low-density tail;
+# the ATK default (30% >=10M) is unreachable at this scale and burns the
+# full reshape-retry budget — or deadlocks via the cap-halving spiral.
+# See GENERALIZATION.md §5.3 for the design rules.
+shape_distributions:
+  - [1048576, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores —
+# its matrix is fixed). dtypes [bf16] x 10 keeps a comparable baseline;
+# raise it (e.g. 50) for sampling volume.
+dtype_numbers: 10
+# Boundary track switch: 0 keeps the default baseline off; tests may flip
+# to 'all' — category selection is per-input boundary flags below. With
+# this yaml's flags (empty/infnan/scalar off) the track yields only
+# lower/upper VALUE-border cases, which are legal; contract-illegal ones
+# fail fast at generation with an actionable error from the hook guard.
+extra_numbers: 0
+inputs:
+  # x — the only fully-sampled input on the hook route; the generator hook
+  # mirrors x's last dim onto ln_w/ln_b and the weight's in-dim, and x's
+  # dtype onto all five coupled tensors. Determinism: same yaml +
+  # `atk case -s 1234` (CLI default seed) + same ATK version ⇒ identical
+  # cases.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3, 4]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy — grad_output seed; range live; shape/dtype patched to
+  # x.shape[:-1] + [out_features] in after_case_config (its out dependency
+  # comes later in the slot order). Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # ln_weight — layer-norm gamma; range live, shape/dtype patched to
+  # [x.shape[-1]]. Raw sampling pinned minimal, hook overwrites.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[0.5, 1.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # ln_bias — layer-norm beta; range live, shape/dtype patched to
+  # [x.shape[-1]]. Dead input under normalization="RMSNorm" (patched
+  # anyway so the case files stay faithful). Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # weight — SEMI-live: native sampling draws a 2-D [out, in_raw] shape
+  # from this pool; the hook keeps the FIRST dim (out_features, the only
+  # free dimension) and forces the second to x's last dim.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # bias — linear bias vector; range live, shape/dtype patched to
+  # [out_features]. Dead input under bias_enabled=False. Raw sampling
+  # pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # eps — must be >= 0 under BOTH normalizations (LayerNorm denominator
+  # sqrt(var+eps), RMSNorm sqrt(mean(x^2)+eps)); source default 1e-5 on
+  # both TENPU and NVTE sides. ATK's fallback range [-5, 5] includes
+  # negatives — keep an explicit positive range.
+  - type: attr
+    dtypes:
+      values: [float]
+    ranges:
+      valid:
+        values: [0.00001, 0.000001, 0.0001]
+  # normalization: "LayerNorm" or "RMSNorm" (RMSNorm mode makes ln_bias a
+  # dead input). String attrs must keep an explicit value set — ATK's
+  # numeric fallback range [-5, 5] does not match their semantics.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [LayerNorm, RMSNorm]
+  # bias: linear bias on/off.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # zero_centered_gamma: use (1 + gamma) in the layer norm.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]

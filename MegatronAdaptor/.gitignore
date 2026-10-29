@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.idea
+
+replay*.log
+hs_err*.log
+
+# 私有凭据（勿提交）
+.agent/skills/megatron-adaptor-sync/scripts/.push_config.json
+
+# 运行时学习数据（构建结果；随 CI 报告推送至 CI 仓 sync_build_results/，不随代码仓版本化）
+# 诊断知识（case 记录）已固化至 references/case_library.md
+.agent/skills/megatron-adaptor-sync/scripts/nightly_case_library.jsonl
+.agent/skills/megatron-adaptor-sync/output/

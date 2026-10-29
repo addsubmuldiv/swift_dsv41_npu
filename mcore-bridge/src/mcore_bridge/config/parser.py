@@ -1,0 +1,473 @@
+# Copyright (c) ModelScope Contributors. All rights reserved.
+import torch.nn.functional as F
+from functools import partial
+from megatron.core.activations import squared_relu
+from transformers import PretrainedConfig
+from typing import Any, Dict, Tuple
+
+from mcore_bridge.utils import get_env_args
+
+config_mapping = {
+    'num_layers': ['num_hidden_layers'],
+    'hidden_size': ['hidden_size'],
+    'mlp_ffn_hidden_size': ['intermediate_size_mlp'],
+    'ffn_hidden_size': ['intermediate_size'],
+    'num_attention_heads': ['num_attention_heads'],
+    'num_query_groups': ['num_key_value_heads'],
+    'max_position_embeddings': ['max_position_embeddings'],
+    'layernorm_epsilon': ['rms_norm_eps', 'layer_norm_epsilon'],
+    'rotary_base': ['rope_theta'],
+    'padded_vocab_size': ['vocab_size'],
+    'attention_dropout': ['attention_dropout'],
+    'untie_embeddings_and_output_weights': ['tie_word_embeddings'],
+    'swiglu': ['hidden_act'],
+    'add_qkv_bias': ['attention_bias', 'qkv_bias', 'use_bias'],
+    'add_bias_linear': ['mlp_bias'],
+    'kv_channels': ['head_dim'],
+    'hf_model_type': ['model_type'],
+    'image_token_id': ['image_token_id'],
+    # moe
+    'moe_ffn_hidden_size': ['moe_intermediate_size'],
+    'moe_shared_expert_intermediate_size': ['shared_expert_intermediate_size', 'moe_shared_expert_intermediate_size'],
+    'moe_router_topk': ['num_experts_per_tok', 'moe_topk', 'moe_k', 'top_k_experts'],
+    'moe_router_num_groups': ['n_group'],
+    'moe_router_group_topk': ['topk_group'],
+    'num_moe_experts': ['num_experts', 'n_routed_experts', 'moe_num_experts', 'num_local_experts'],
+    'moe_router_pre_softmax': ['norm_topk_prob'],
+    'moe_router_enable_expert_bias': ['moe_router_enable_expert_bias'],
+    'rotary_interleaved': ['rope_interleave'],
+    # deepseek
+    'q_lora_rank': ['q_lora_rank'],
+    'kv_lora_rank': ['kv_lora_rank'],
+    'moe_router_score_function': ['scoring_func', 'moe_router_use_sigmoid', 'score_function'],
+    'moe_router_bias_update_rate': ['aux_loss_alpha'],
+    'qk_head_dim': ['qk_nope_head_dim'],
+    'qk_pos_emb_head_dim': ['qk_rope_head_dim'],
+    'v_head_dim': ['v_head_dim'],
+    'moe_router_topk_scaling_factor': ['routed_scaling_factor', 'router_scaling_factor'],
+    'qk_layernorm': ['use_qk_norm', 'qk_norm'],
+    # qwen3_next/qwen3_5
+    'linear_attention_freq': ['full_attention_interval'],
+    'linear_num_key_heads': ['linear_num_key_heads'],
+    'linear_num_value_heads': ['linear_num_value_heads'],
+    'linear_key_head_dim': ['linear_key_head_dim'],
+    'linear_value_head_dim': ['linear_value_head_dim'],
+    'linear_conv_kernel_dim': ['linear_conv_kernel_dim'],
+    # glm5_next (KDA); `linear_lower_bound` is HF's resolved safe-gate bound
+    'linear_num_heads': ['linear_num_heads'],
+    'linear_head_dim': ['linear_head_dim'],
+    'linear_lower_bound': ['linear_lower_bound'],
+    'hc_eps': ['hc_eps'],
+    'index_kpool': ['index_kpool'],
+    # qwen4_exp
+    'hc_count': ['hc_count'],
+    'hc_lowrank': ['hc_lowrank'],
+    'ple_layer_ids': ['ple_layer_ids'],
+    'ple_embed_dim': ['ple_embed_dim'],
+    'ple_conv_kernel_size': ['ple_conv_kernel_size'],
+    'ngram_size': ['ngram_size'],
+    'heads_per_ngram': ['heads_per_ngram'],
+    'ngram_vocab_size_base': ['ngram_vocab_size_base'],
+    'make_ngram_vocab_size_divisible_by': ['make_ngram_vocab_size_divisible_by'],
+    'split_ngram_parts': ['split_ngram_parts'],
+    'indexer_n_heads': ['indexer_n_heads'],
+    'indexer_kv_heads': ['indexer_kv_heads'],
+    'indexer_head_dim': ['indexer_head_dim'],
+    'indexer_budget': ['indexer_budget'],
+    'indexer_compress_ratio': ['indexer_compress_ratio'],
+    'output_gate_type': ['output_gate_type'],
+    # dsa
+    'dsa_indexer_n_heads': ['index_n_heads'],
+    'dsa_indexer_head_dim': ['index_head_dim'],
+    'dsa_indexer_topk': ['index_topk'],
+    'dsa_indexer_rotary_interleaved': ['indexer_rope_interleave'],
+    'dsa_indexer_topk_freq': ['index_topk_freq'],
+    'dsa_indexer_skip_topk_offset': ['index_skip_topk_offset'],
+    # deepseek_v4
+    'csa_compress_ratios': ['compress_rates'],
+    'csa_compress_rotary_base': ['compress_rope_theta'],
+    # deepseek_v41 / CSA2 source-layer routing
+    'csa2_kv_source_layers': ['kv_source_layer_ids'],
+    'csa2_index_source_layers': ['index_source_layer_ids'],
+    'csa2_candidate_source_layer': ['candidate_source_layer_id'],
+    'csa2_candidate_topk_blocks': ['candidate_topk_blocks'],
+    'csa2_candidate_block_size': ['candidate_block_size'],
+    'o_groups': ['o_groups'],
+    'o_lora_rank': ['o_lora_rank'],
+    'num_residual_streams': ['hc_mult'],
+    'mhc_sinkhorn_iterations': ['hc_sinkhorn_iters'],
+    'moe_n_hash_layers': ['mlp_layer_types'],
+    'engram_layer_ids': ['engram_layer_ids'],
+    'engram_num_embeddings': ['engram_num_embeddings'],
+    'engram_max_ngram_size': ['engram_max_ngram_size'],
+    'engram_vocab_size': ['engram_vocab_size'],
+    'engram_n_heads': ['engram_n_heads'],
+    'engram_head_dim': ['engram_head_dim'],
+    'engram_pad_token_id': ['engram_pad_token_id'],
+    'engram_compressed_vocab_size': ['engram_compressed_vocab_size'],
+    'engram_tokenizer_map': ['engram_tokenizer_map'],
+    # DeepSeek-V4.1 DSpark is a parallel draft stack, not Megatron's autoregressive MTP.
+    'dspark_num_layers': ['num_nextn_predict_layers'],
+    'dspark_block_size': ['dspark_block_size'],
+    'dspark_noise_token_id': ['dspark_noise_token_id'],
+    'dspark_target_layer_ids': ['dspark_target_layer_ids'],
+    'dspark_markov_rank': ['dspark_markov_rank'],
+    'dspark_num_experts': ['dspark_n_routed_experts'],
+    'dspark_router_topk': ['dspark_num_experts_per_tok', 'dspark_n_activated_experts'],
+    'activation_func_clamp_value': ['swiglu_limit'],
+    # nemotron_h / mamba2
+    'mamba_num_heads': ['mamba_num_heads'],
+    'mamba_head_dim': ['mamba_head_dim'],
+    'mamba_state_dim': ['ssm_state_size', 'mamba_state_dim'],
+    'mamba_num_groups': ['n_groups', 'mamba_num_groups'],
+    'hybrid_layer_pattern': ['hybrid_override_pattern'],
+    'fp32_residual_connection': ['residual_in_fp32'],
+    'moe_latent_size': ['moe_latent_size'],
+    'mtp_hybrid_override_pattern': ['mtp_hybrid_override_pattern'],
+    # other
+    'original_max_position_embeddings': ['original_max_position_embeddings'],
+    'partial_rotary_factor': ['partial_rotary_factor'],
+    'first_k_dense_replace': ['first_k_dense_replace', 'moe_layer_start_index'],
+    'n_shared_experts': ['n_shared_experts', 'num_shared_expert', 'moe_num_shared_experts', 'num_shared_experts'],
+    'window_size': ['sliding_window'],
+    'layer_types': ['layer_types'],
+    'interleave_moe_layer_step': ['interleave_moe_layer_step'],
+}
+
+
+# transformers>=5.15 (huggingface/transformers#47384) keeps attributes that differ across layers in
+# `config.per_layer_config`; reading them on the global config raises AmbiguousGlobalPerLayerAttributeError.
+def has_per_layer_config(config) -> bool:
+    return getattr(config, 'per_layer_config', None) is not None
+
+
+def get_gemma4_attention_dims(text_config, layer_type: str) -> Tuple[int, int]:
+    """Return `(head_dim, num_key_value_heads)` used by Gemma 4 layers of `layer_type`."""
+    if has_per_layer_config(text_config):
+        layer_config = text_config.per_layer_config[layer_type]
+        return layer_config.head_dim, layer_config.num_key_value_heads
+    # transformers<5.15: full-attention layers read `global_head_dim` / `num_global_key_value_heads`.
+    is_sliding = layer_type == 'sliding_attention'
+    head_dim = text_config.global_head_dim if not is_sliding and text_config.global_head_dim else text_config.head_dim
+    if not is_sliding and text_config.attention_k_eq_v:
+        num_key_value_heads = text_config.num_global_key_value_heads
+    else:
+        num_key_value_heads = text_config.num_key_value_heads
+    return head_dim, num_key_value_heads
+
+
+def get_gemma4_rope_head_dim_key(text_config) -> str:
+    # transformers>=5.15 resolves `per_layer_config['full_attention']` in the RoPE init (global head_dim there).
+    return 'head_dim' if has_per_layer_config(text_config) else 'global_head_dim'
+
+
+def _convert_config(config, _internal_call=False) -> Dict[str, Any]:
+    megatron_config = {}
+    # Per-layer attributes have no single global value; model-specific code reads them per layer.
+    per_layer_attributes = getattr(config, 'per_layer_attributes', None) or ()
+    for k, hf_keys in config_mapping.items():
+        for hf_k in hf_keys:
+            if hf_k in per_layer_attributes:
+                continue
+            if hasattr(config, hf_k):
+                hf_v = getattr(config, hf_k)
+                if hf_v is None:
+                    continue
+                if k == 'rotary_base':
+                    megatron_config[k] = int(hf_v)
+                elif k in {'untie_embeddings_and_output_weights', 'moe_router_pre_softmax'}:
+                    megatron_config[k] = not hf_v
+                elif k == 'swiglu':
+                    if hf_v == 'silu':
+                        megatron_config[k] = True
+                elif hf_k == 'moe_router_use_sigmoid':
+                    if hf_v:
+                        megatron_config[k] = 'sigmoid'
+                    else:
+                        continue
+                else:
+                    if k in {'q_lora_rank', 'kv_lora_rank'}:
+                        megatron_config['multi_latent_attention'] = True
+                    elif k == 'hf_model_type':
+                        if _internal_call:
+                            k = 'llm_model_type'
+                    megatron_config[k] = hf_v
+                break
+    for key in ['text_config', 'llm_config', 'thinker_config']:
+        if hasattr(config, key):
+            megatron_config.update(_convert_config(getattr(config, key), _internal_call=True))
+    # compat llama3
+    if getattr(config, 'rope_scaling', None) is not None:
+        if isinstance(config.rope_scaling, int):
+            megatron_config['rope_scaling'] = {'factor': config.rope_scaling, 'type': 'linear'},
+        elif isinstance(config.rope_scaling, dict):
+            megatron_config['rope_scaling'] = config.rope_scaling
+    return megatron_config
+
+
+def _get_tie_word_embeddings(config_dict):
+    tie_word_embeddings = config_dict.get('tie_word_embeddings')
+    for key in ['text_config', 'llm_config', 'thinker_config']:
+        if config_dict.get(key) is not None:
+            value = _get_tie_word_embeddings(config_dict[key])
+            if value is not None:
+                tie_word_embeddings = value
+    return tie_word_embeddings
+
+
+def hf_to_mcore_config(hf_config: PretrainedConfig) -> Dict[str, Any]:
+    res = _convert_config(hf_config)
+    if hf_config.name_or_path:
+        # fix Qwen3-Omni
+        config_dict = PretrainedConfig.get_config_dict(hf_config.name_or_path)[0]
+        tie_word_embeddings = _get_tie_word_embeddings(config_dict)
+        if tie_word_embeddings is not None:
+            res['untie_embeddings_and_output_weights'] = not tie_word_embeddings
+    res['hf_config'] = hf_config
+    hf_model_type = res.get('hf_model_type')
+    llm_model_type = res.get('llm_model_type') or hf_model_type
+    if hf_model_type == 'nemotron_h_omni':
+        llm_model_type = 'nemotron_h'
+    res['llm_model_type'] = llm_model_type
+
+    first_k_dense_replace = res.pop('first_k_dense_replace', None)
+    n_shared_experts = res.pop('n_shared_experts', None)
+    layer_types = res.pop('layer_types', None)
+    mlp_ffn_hidden_size = res.pop('mlp_ffn_hidden_size', None)
+    interleave_moe_layer_step = res.pop('interleave_moe_layer_step', None)
+    window_size = res.pop('window_size', None)
+    moe_n_hash_layers = res.pop('moe_n_hash_layers', None)
+    rope_scaling = res.get('rope_scaling') or {}
+    if llm_model_type in {'qwen3', 'qwen3_moe', 'qwen3_next'} or hf_model_type in {
+            'qwen3_omni_moe', 'qwen3_omni', 'qwen3_vl', 'qwen3_vl_moe', 'qwen3_5', 'qwen3_5_moe', 'llavaonevision1_5',
+            'minicpmv4_6'
+    }:
+        res['qk_layernorm'] = True
+    if llm_model_type in {'qwen2_moe', 'qwen3_moe', 'qwen3_next'
+                          } or hf_model_type in {'qwen3_omni_moe', 'qwen3_vl_moe', 'qwen3_5_moe'}:
+        res.pop('ffn_hidden_size', None)
+        if llm_model_type in {'qwen2_moe', 'qwen3_next'} or hf_model_type == 'qwen3_5_moe':
+            res['moe_shared_expert_gate'] = True
+    if llm_model_type in {
+            'deepseek', 'deepseek_v2', 'deepseek_v3', 'kimi_k2', 'deepseek_v32', 'dots1', 'deepseek_v4',
+            'deepseek_v41_text'
+    } or hf_model_type == 'kimi_vl':
+        if llm_model_type != 'deepseek':
+            res['qk_layernorm'] = True
+        res['moe_router_load_balancing_type'] = 'seq_aux_loss'
+        if llm_model_type == 'dots1':
+            res['moe_router_score_function'] = 'sigmoid'
+        elif llm_model_type == 'deepseek_v32':
+            res['experimental_attention_variant'] = 'dsa'
+        elif llm_model_type == 'deepseek_v4':
+            if 'v_head_dim' not in res:
+                res['v_head_dim'] = res['kv_channels']
+            res['experimental_attention_variant'] = 'dsv4_hybrid'
+            res['moe_router_enable_expert_bias'] = True
+            res['csa_window_size'] = window_size
+            res['enable_hyper_connections'] = True
+            csa_compress_ratios = res.pop('csa_compress_ratios', None)
+            res['csa_compress_ratios'] = [csa_compress_ratios.get(layer_type, 0) for layer_type in layer_types]
+            res['moe_n_hash_layers'] = len([layer for layer in moe_n_hash_layers if layer == 'hash_moe'])
+        elif llm_model_type == 'deepseek_v41_text':
+            if 'v_head_dim' not in res:
+                res['v_head_dim'] = res['kv_channels']
+            res['experimental_attention_variant'] = 'dsv4_hybrid'
+            res['dsv4_version'] = 'v4.1'
+            # Native V4.1 uses unrotated indexer activations and no YaRN
+            # amplitude scaling (generic MLA defaults differ).
+            res['dsa_indexer_rotate_activation'] = False
+            res['mscale'] = 0.0
+            res['mscale_all_dim'] = 0.0
+            res['moe_router_enable_expert_bias'] = True
+            res['moe_router_enable_vl_bias'] = getattr(hf_config, 'vision_config', None) is not None
+            res['csa_window_size'] = window_size
+            res['enable_hyper_connections'] = True
+            res['mhc_single_pass'] = True
+            # CSA2 consumes raw 0/1/2 ratios; drop any trailing MTP entries.
+            res.pop('csa_compress_ratios', None)
+            text_config = getattr(hf_config, 'text_config', hf_config)
+            res['csa_compress_ratios'] = list(text_config.compress_ratios)[:res['num_layers']]
+            # V4.1 has no Hash-MoE bootstrap layers.
+            res['moe_n_hash_layers'] = 0
+            res['engram_enabled'] = bool(res.get('engram_layer_ids'))
+    elif llm_model_type == 'hunyuan':
+        # Since HunYuan’s attention applies RoPE before using q/k_layernorm,
+        # which is incompatible with megatron-core, support is not provided here.
+        res['n_shared_experts'] = n_shared_experts
+        for key in ['moe_ffn_hidden_size', 'n_shared_experts', 'moe_router_topk']:
+            val = res.get(key)
+            if isinstance(val, list) and val and min(val) == max(val):
+                res[key] = val[0]
+        n_shared_experts = res.pop('n_shared_experts')
+    elif hf_model_type == 'glm5_next':
+        text_config = hf_config.text_config
+        num_layers = res['num_layers']
+        layer_types = text_config.layer_types
+        mlp_layer_types = text_config.mlp_layer_types
+        # `hc_mult` reaches `num_residual_streams` through config_mapping (deepseek_v4's mHC
+        # field); Megatron dev's hybrid transformer block, which expands the residual into mHC
+        # streams, reads `hc_count` for the same thing.
+        res['hc_count'] = res['num_residual_streams']
+        pattern = ''.join(('K' if attn == 'linear_attention' else 'D') + ('E' if mlp == 'sparse' else '-')
+                          for attn, mlp in zip(layer_types, mlp_layer_types))
+        res['hybrid_layer_pattern'] = pattern
+        res['is_hybrid_model'] = True
+        res['num_layers'] = len(pattern)
+        res['linear_attention_freq'] = '[' + ','.join(str(int(symbol == 'K')) for symbol in pattern) + ']'
+        res['moe_layer_freq'] = '[' + ','.join(str(int(symbol == 'E')) for symbol in pattern) + ']'
+        res['enable_hyper_connections'] = True
+        res['position_embedding_type'] = 'none'
+        # config_mapping reads `kv_channels` off HF's `head_dim`, which glm5_next forces to
+        # `qk_rope_head_dim` (0, NoPE). Restore MCore's own default so the MLA dims stay intact.
+        res['kv_channels'] = res['hidden_size'] // res['num_attention_heads']
+        res['qk_layernorm'] = True
+        res['moe_router_load_balancing_type'] = 'none'
+        res['moe_router_enable_expert_bias'] = True
+        # moe_layer_freq above already encodes mlp_layer_types; keep the generic
+        # first_k_dense_replace expansion at the end of this function from overwriting it.
+        first_k_dense_replace = None
+    elif llm_model_type in {'ernie4_5', 'ernie4_5_moe', 'glm4'}:
+        res['rotary_interleaved'] = True
+    elif hf_model_type in {'gemma4', 'gemma4_unified'}:
+        # Global defaults follow the sliding layers; `Gemma4SelfAttention` overrides them for full-attention layers.
+        res['kv_channels'], res['num_query_groups'] = get_gemma4_attention_dims(hf_config.text_config,
+                                                                                'sliding_attention')
+        res['qk_layernorm'] = True
+        res['window_size'] = f'{window_size - 1},0'
+        window_attn_skip_freq = ','.join(['1' if lt == 'sliding_attention' else '0' for lt in layer_types])
+        res['window_attn_skip_freq'] = f'[{window_attn_skip_freq}]'
+        res['softmax_scale'] = 1.
+        res['swiglu'] = False
+        res['gated_linear_unit'] = True
+        res['activation_func'] = partial(F.gelu, approximate='tanh')
+    elif hf_model_type == 'muse_glimmer':
+        # 39 sliding layers (window 2048) interleaved with 13 full-attention layers; the latter are
+        # exactly the NoPE layers (`layer_rope_theta == 0`).
+        res['window_size'] = f'{window_size - 1},0'
+        window_attn_skip_freq = ','.join(['1' if lt == 'sliding_attention' else '0' for lt in layer_types])
+        res['window_attn_skip_freq'] = f'[{window_attn_skip_freq}]'
+        # The four per-layer norms are `CenteredRMSNorm` (`x * (1.0 + w)`). The final `norm` is a plain
+        # RMSNorm, so `MuseGlimmerLoader.build_model` opts that single module back out.
+        res['layernorm_zero_centered_gamma'] = True
+    elif llm_model_type == 'gpt_oss':
+        res['add_bias_linear'] = True
+        res['bias_dropout_fusion'] = False
+        res['softmax_type'] = 'learnable'
+        res['swiglu'] = False
+        res['quick_geglu'] = True
+        res['activation_func_clamp_value'] = 7
+        res['glu_linear_offset'] = 1
+        res['window_size'] = f'{window_size - 1},0'
+        if layer_types is None:
+            res['window_attn_skip_freq'] = '2'
+        else:
+            window_attn_skip_freq = ','.join(['1' if lt == 'sliding_attention' else '0' for lt in layer_types])
+            res['window_attn_skip_freq'] = f'[{window_attn_skip_freq}]'
+    elif llm_model_type in {'glm4_moe', 'glm4_moe_lite', 'glm_moe_dsa'} or hf_model_type == 'glm4v_moe':
+        res['moe_router_score_function'] = 'sigmoid'
+        if llm_model_type in {'glm4_moe_lite', 'glm_moe_dsa'}:
+            res['qk_layernorm'] = True
+            res.pop('num_query_groups', None)
+        if llm_model_type == 'glm_moe_dsa':
+            res['experimental_attention_variant'] = 'dsa'
+    elif llm_model_type == 'qwen3_next' or hf_model_type in {'qwen3_5', 'qwen3_5_moe', 'minicpmv4_6'}:
+        use_mcore_gdn = get_env_args('USE_MCORE_GDN', bool, True)
+        res['layernorm_zero_centered_gamma'] = True
+        res['attention_output_gate'] = True
+        if use_mcore_gdn:
+            res['experimental_attention_variant'] = 'gated_delta_net'
+        res.setdefault('linear_attention_freq', 4)
+    elif hf_model_type == 'qwen4_exp':
+        use_mcore_gdn = get_env_args('USE_MCORE_GDN', bool, True)
+        res['layernorm_zero_centered_gamma'] = True
+        res['attention_output_gate'] = True
+        res['qk_layernorm'] = True
+        res['linear_decoupled_in_proj'] = True
+        res['moe_shared_expert_gate'] = True
+        if use_mcore_gdn:
+            res['experimental_attention_variant'] = 'gated_delta_net'
+        text_config = getattr(hf_config, 'text_config', hf_config)
+        num_layers = res['num_layers']
+        linear_pattern = ['1' if t == 'linear_attention' else '0' for t in layer_types]
+        res['linear_attention_freq'] = f"[{','.join(linear_pattern)}]"
+        if res.get('num_moe_experts'):
+            res['moe_layer_freq'] = f"[{','.join(['1'] * num_layers)}]"
+        # seed is hardcoded in transformers, not in config
+        res['ple_seed'] = int(getattr(text_config, 'seed', 1234))
+        eos_token_id = getattr(text_config, 'eos_token_id', None)
+        if eos_token_id is not None:
+            res['eos_token_id'] = eos_token_id
+        # These fields must come from the model config: ModelConfig carries no
+        # defaults for them, and a silently substituted value would corrupt the
+        # n-gram hash-table sharding/math at checkpoint conversion.
+        _required = [
+            'hc_count', 'hc_lowrank', 'ple_layer_ids', 'ple_embed_dim', 'ple_conv_kernel_size', 'ngram_size',
+            'heads_per_ngram', 'ngram_vocab_size_base', 'make_ngram_vocab_size_divisible_by', 'split_ngram_parts',
+            'eos_token_id', 'indexer_n_heads', 'indexer_kv_heads', 'indexer_head_dim', 'indexer_budget',
+            'indexer_compress_ratio'
+        ]
+        _missing = [k for k in _required if res.get(k) is None]
+        if _missing:
+            raise ValueError(f'qwen4_exp config is missing required fields: {_missing}. '
+                             'They must be provided by the model config.json.')
+    elif llm_model_type == 'minimax_m2':
+        res['add_qkv_bias'] = False
+    elif llm_model_type == 'olmoe':
+        res['qk_layernorm'] = True
+    elif hf_model_type == 'llama4':
+        qk_layernorm = res.pop('qk_layernorm', False)
+        if qk_layernorm:
+            res['qk_l2_norm'] = True
+        res['no_rope_freq'] = 4
+        res['moe_apply_probs_on_input'] = True
+        res['rotary_interleaved'] = True
+        res['moe_router_score_function'] = 'sigmoid'
+        res['moe_ffn_hidden_size'] = res['ffn_hidden_size']
+        res['ffn_hidden_size'] = mlp_ffn_hidden_size
+        res['moe_router_enable_expert_bias'] = False
+        res['moe_shared_expert_intermediate_size'] = res['moe_ffn_hidden_size']
+        if interleave_moe_layer_step > 1:
+            moe_layer_freq = [
+                '1' if i % interleave_moe_layer_step == (interleave_moe_layer_step - 1) else '0'
+                for i in range(res['num_layers'])
+            ]
+            res['moe_layer_freq'] = f"[{','.join(moe_layer_freq)}]"
+    elif hf_model_type == 'glm4v':
+        res['rotary_interleaved'] = True
+    elif llm_model_type == 'bailing_hybrid':
+        res['qk_layernorm'] = True
+        res['add_qkv_bias'] = False
+        res['moe_router_score_function'] = 'sigmoid'
+        res['moe_router_load_balancing_type'] = 'seq_aux_loss'
+    elif llm_model_type == 'nemotron_h':
+        res['is_hybrid_model'] = True
+        res['position_embedding_type'] = 'none'
+        # relu^2 ("relu2") activation: non-gated, so fc1 is a single up_proj (no gate_proj).
+        res['swiglu'] = False
+        res['gated_linear_unit'] = False
+        res['activation_func'] = squared_relu
+        res['add_bias_linear'] = False
+        res['add_qkv_bias'] = False
+        res['qk_layernorm'] = False
+        res['moe_router_score_function'] = 'sigmoid'
+        res['moe_router_enable_expert_bias'] = True
+        res['moe_router_load_balancing_type'] = 'seq_aux_loss'
+
+    if 'partial_rotary_factor' not in res and 'partial_rotary_factor' in rope_scaling:
+        res['partial_rotary_factor'] = rope_scaling['partial_rotary_factor']
+    if 'rotary_base' not in res and 'rope_theta' in rope_scaling:
+        res['rotary_base'] = rope_scaling['rope_theta']
+    if rope_scaling.get('mrope_section') is not None:
+        res['position_embedding_type'] = 'mrope'
+        res['mrope_section'] = rope_scaling['mrope_section']
+        mrope_interleaved = rope_scaling.get('mrope_interleaved', False) or rope_scaling.get('interleaved', False)
+        res['mrope_interleaved'] = mrope_interleaved
+
+    if first_k_dense_replace is not None:
+        res['moe_layer_freq'] = f'[0]*{first_k_dense_replace}+[1]*{res["num_layers"] - first_k_dense_replace}'
+    if res.get('moe_router_score_function', 'softmax') == 'sigmoid' and 'moe_router_enable_expert_bias' not in res:
+        res['moe_router_enable_expert_bias'] = True
+    if n_shared_experts is not None and 'moe_shared_expert_intermediate_size' not in res:
+        res['moe_shared_expert_intermediate_size'] = n_shared_experts * res['moe_ffn_hidden_size']
+    return res

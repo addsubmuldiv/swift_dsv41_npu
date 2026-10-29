@@ -1,0 +1,7 @@
+test_disable_quantization_layer:
+  enabled: True
+  layers:
+    layer_types: [qkv]
+  transformer_engine:
+    DisableQuantizationLayer:
+      enabled: True

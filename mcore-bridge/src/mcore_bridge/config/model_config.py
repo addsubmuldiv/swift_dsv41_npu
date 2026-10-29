@@ -1,0 +1,506 @@
+# Copyright (c) ModelScope Contributors. All rights reserved.
+import copy
+import os
+import re
+import torch.nn.functional as F
+from dataclasses import dataclass
+from megatron.core import mpu
+from megatron.core.transformer import TransformerConfig
+from megatron.core.transformer.transformer_config import MLATransformerConfig
+from transformers import PretrainedConfig
+from transformers.utils import is_torch_npu_available
+from transformers.utils.versions import require_version
+from typing import List, Literal, Optional, Union
+
+from mcore_bridge.utils import get_logger, json_parse_to_dict
+
+logger = get_logger()
+
+
+# code borrowed from NVIDIA/Megatron-LM
+def _eval_pattern(pattern):
+    """ Validate and evaluate a string containing a Python list expression """
+    assert isinstance(pattern, str)
+
+    # validate input, only allow comma, digits, [, ], (, ), +, and *
+    if bool(re.compile(r'[^,\d\[\]\(\)\+\*]').search(pattern)):
+        raise ValueError(f'Invalid pattern: {pattern}')
+
+    return eval(pattern)
+
+
+# code borrowed from NVIDIA/Megatron-LM
+def no_rope_freq_type(x):
+    """ Controls which layers to skip performing Rotary Position Embedding.
+    - An integer N: Represents a 1:N ratio, meaning RoPE is skipped every N-1 layers.
+    - A string "N": Same as above, but provided as a string
+    - A string containing a Python list expression that defines a custom pattern, e.g.:
+      "([0]*3+[1]*1)*3" evaluates to [0,0,0,1,0,0,0,1,0,0,0,1]
+      where 1 indicates rope is skipped on the layer.
+      This allows defining arbitrary patterns of rope skipping.
+      The pattern length must match the total number of transformer layers.
+      Examples:
+          "([1]+[0]*23)": Only first layer has rope skipped for a 24-layer network.
+          "([0]*3+[1]*1)*2": Every 4 layers the rope is skipped on the last layer. Repeat twice.
+    """
+    if x is None or isinstance(x, int):
+        return x
+    assert isinstance(x, str)
+    if '[' in x:
+        # it's a custom pattern
+        return _eval_pattern(x)
+    else:
+        # it's a single int but in str
+        return int(x)
+
+
+def linear_attn_freq_type(x):
+    """Frequency between LA (linear attention) layers and SDPA (scaled dot-product attention) layers.
+
+    Accepts either:
+    - An integer N: Represents a (N-1):N ratio, meaning (N-1) LA layers for every 1 SDPA layer
+    - A string "N": Same as above, but provided as a string
+    - A string containing a Python list expression that defines a custom pattern, e.g.:
+      "([1]*3+[0]*1)*3" evaluates to [1,1,1,0,1,1,1,0,1,1,1,0]
+      where 1 indicates an LA layer and 0 indicates a SDPA layer.
+      This allows defining arbitrary patterns of LA and SDPA layers.
+      The pattern length must match the total number of transformer layers.
+      Examples:
+          "([0]+[1]*23)": 1 SDPA layer followed by 23 LA layers
+          "([1]*3+[0]*2)*2": Three LA layers followed by two SDPA layers, repeated twice.
+    """
+    return no_rope_freq_type(x)
+
+
+# code borrowed from NVIDIA/Megatron-LM
+def moe_freq_type(x):
+    """Frequency between MoE layers and Dense layers.
+
+    Accepts either:
+    - An integer N: Represents a 1:N ratio, meaning one expert layer for every N-1 dense layers
+    - A string "N": Same as above, but provided as a string
+    - A string containing a Python list expression that defines a custom pattern, e.g.:
+      "([1]*3+[0]*1)*3" evaluates to [1,1,1,0,1,1,1,0,1,1,1,0]
+      where 1 indicates an expert layer and 0 indicates a dense layer.
+      This allows defining arbitrary patterns of expert and dense layers.
+      The pattern length must match the total number of transformer layers.
+      Examples:
+          "([0]+[1]*23)": 1 dense layer followed by 23 experts layers
+          "([1]*3+[0]*2)*2": Three expert layers followed by two dense layers, repeated twice.
+    """
+    if isinstance(x, int):
+        return x
+    assert isinstance(x, str)
+    if '[' in x:
+        # it's a custom pattern
+        return _eval_pattern(x)
+    else:
+        # it's a single int but in str
+        return int(x)
+
+
+# code borrowed from NVIDIA/Megatron-LM
+def tuple_type(x):
+    """
+    Convert a string to a tuple of integers.
+    Examples:
+        "1,2,3" -> (1, 2, 3)
+        "(1,2,3)" -> (1, 2, 3)
+    """
+    if x is None or isinstance(x, tuple):
+        return x
+    assert isinstance(x, str)
+    return tuple(int(i) for i in x.strip('()').split(','))
+
+
+@dataclass
+class ModelConfig(TransformerConfig):
+    mcore_model_type: Optional[str] = None  # Inferred from hf_model_type by default
+    hf_model_type: Optional[str] = None
+    llm_model_type: Optional[str] = None
+    padded_vocab_size: Optional[int] = None
+    rope_scaling: Optional[Union[dict, str]] = None
+    attention_scaling: float = 1.
+
+    # model
+    num_layers: Optional[int] = None
+    hidden_size: Optional[int] = None
+    ffn_hidden_size: Optional[int] = None
+    num_attention_heads: Optional[int] = None
+    num_query_groups: Optional[int] = None
+    softmax_type: Literal['vanilla', 'off-by-one', 'learnable'] = 'vanilla'
+    window_size: Optional[str] = None
+    window_attn_skip_freq: Optional[str] = None
+    max_position_embeddings: Optional[int] = None
+
+    position_embedding_type: Literal['learned_absolute', 'rope', 'mrope', 'none'] = 'rope'
+    rotary_base: int = 10000
+    rotary_percent: float = 1.
+    rotary_interleaved: bool = False
+    original_max_position_embeddings: Optional[int] = None
+    partial_rotary_factor: Optional[float] = None
+    mrope_section: Optional[List[int]] = None
+    # qwen3_vl, qwen3_omni
+    mrope_interleaved: bool = False
+
+    normalization: Literal['LayerNorm', 'RMSNorm'] = 'RMSNorm'
+    layernorm_epsilon: float = 1e-5
+    attention_latent_norm_epsilon: Optional[float] = None
+    swiglu: bool = True
+    quick_geglu: bool = False
+    activation_func_clamp_value: Optional[float] = None
+    glu_linear_offset: float = 0.
+    untie_embeddings_and_output_weights: bool = True
+    add_bias_linear: bool = False
+    add_qkv_bias: bool = True
+    attention_dropout: float = 0.
+    hidden_dropout: float = 0.
+    kv_channels: Optional[int] = None
+    qk_layernorm: bool = False
+    qk_l2_norm: bool = False
+    no_rope_freq: Optional[int] = None
+    moe_apply_probs_on_input: Optional[bool] = None
+
+    # moe
+    num_moe_experts: Optional[int] = None
+    moe_layer_freq: str = '1'
+    moe_ffn_hidden_size: Optional[int] = None
+    moe_shared_expert_intermediate_size: Optional[int] = None
+
+    moe_router_topk: int = 2
+    moe_router_num_groups: Optional[int] = None
+    moe_router_group_topk: Optional[int] = None
+    moe_router_pre_softmax: bool = False
+    moe_router_score_function: Literal['sigmoid', 'softmax'] = 'softmax'
+    moe_router_bias_update_rate: float = 1e-3
+    moe_router_enable_expert_bias: bool = False
+    # Model-specific VL routing belongs to mcore-bridge rather than Megatron-Core.
+    # DeepSeek-V4.1 selects a separately checkpointed correction bias for image tokens.
+    moe_router_enable_vl_bias: bool = False
+    image_token_id: Optional[int] = None
+    moe_router_topk_scaling_factor: Optional[float] = None
+    # 'aux_loss', 'seq_aux_loss', 'global_aux_loss', 'sinkhorn', 'none'
+    moe_router_load_balancing_type: Union[str, List[str]] = 'aux_loss'
+    moe_shared_expert_gate: bool = False
+
+    # mla
+    multi_latent_attention: bool = False
+    q_lora_rank: Optional[int] = None
+    kv_lora_rank: int = 32
+    qk_head_dim: int = 128
+    qk_pos_emb_head_dim: int = 64
+    v_head_dim: int = 128
+
+    # qwen3_next/qwen3_5
+    linear_attention_freq: Optional[str] = None
+    linear_num_key_heads: Optional[int] = None
+    linear_num_value_heads: Optional[int] = None
+    linear_key_head_dim: Optional[int] = None
+    linear_value_head_dim: Optional[int] = None
+    linear_conv_kernel_dim: Optional[int] = None
+    layernorm_zero_centered_gamma: bool = False
+    attention_output_gate: bool = False
+    linear_decoupled_in_proj: bool = False
+
+    # glm5_next: KDA linear attention (`linear_*` are HF's own field names) + k-pool DSA indexer
+    # + mHC. `hc_count` / `mhc_sinkhorn_iterations` / `num_residual_streams` are reused as-is.
+    linear_num_heads: Optional[int] = None
+    linear_head_dim: Optional[int] = None
+    linear_lower_bound: Optional[float] = None
+    hc_eps: float = 1e-6
+    index_kpool: Optional[int] = None
+
+    # qwen3.8-flash-next (HC + PLE + QSA)
+    hc_count: Optional[int] = None
+    hc_lowrank: Optional[int] = None
+    ple_layer_ids: Optional[List[int]] = None
+    ple_embed_dim: Optional[int] = None
+    ple_conv_kernel_size: Optional[int] = None
+    ngram_size: Optional[int] = None
+    heads_per_ngram: Optional[int] = None
+    ngram_vocab_size_base: Optional[int] = None
+    make_ngram_vocab_size_divisible_by: Optional[int] = None
+    split_ngram_parts: Optional[int] = None
+    ple_seed: Optional[int] = None
+    eos_token_id: Optional[int] = None
+    indexer_n_heads: Optional[int] = None
+    indexer_kv_heads: Optional[int] = None
+    indexer_head_dim: Optional[int] = None
+    indexer_budget: Optional[int] = None
+    indexer_compress_ratio: Optional[int] = None
+    output_gate_type: Optional[str] = None
+
+    # nemotron_h (hybrid mamba2 + attention + moe)
+    hybrid_layer_pattern: Optional[str] = None
+
+    # dsa
+    experimental_attention_variant: Optional[Literal['gated_delta_net', 'dsa', 'dsv4_hybrid']] = None
+    dsa_indexer_n_heads: Optional[int] = None
+    dsa_indexer_head_dim: Optional[int] = None
+    dsa_indexer_topk: Optional[int] = None
+    dsa_indexer_loss_coeff: float = 0.
+    dsa_indexer_use_sparse_loss: bool = False
+    dsa_indexer_rotary_interleaved: bool = False
+    dsa_indexer_topk_freq: int = 1
+    dsa_indexer_skip_topk_offset: int = 0
+
+    # deepseek-v4
+    csa_window_size: int = 128
+    csa_compress_ratios: Optional[List[int]] = None
+    csa_compress_rotary_base: float = 40000.0
+    o_groups: int = 8
+    o_lora_rank: int = 1024
+
+    # Canonical names consumed by TransformerConfig.__post_init__ since the main->dev sync (0.20+);
+    # `o_groups` / `o_lora_rank` remain the dev-era aliases and are reconciled against these.
+    output_projection_groups: int = 8
+    output_projection_lora_rank: int = 1024
+    enable_hyper_connections: bool = False
+    num_residual_streams: int = 4
+    mhc_sinkhorn_iterations: int = 20
+    mhc_init_gating_factor: float = 0.01
+    moe_n_hash_layers: int = 0
+
+    # deepseek-v4.1 engram (HF layer IDs are 0-based)
+    # Declared here as well so the bridge remains importable on the PR #7224 baseline,
+    # where NVIDIA's optional Engram extension is not installed.
+    engram_enabled: bool = False
+    engram_layer_ids: Optional[List[int]] = None
+    engram_num_embeddings: Optional[List[int]] = None
+    engram_max_ngram_size: Optional[int] = None
+    engram_vocab_size: Optional[int] = None
+    engram_n_heads: Optional[int] = None
+    engram_head_dim: Optional[int] = None
+    engram_pad_token_id: Optional[int] = None
+    engram_compressed_vocab_size: Optional[int] = None
+    engram_tokenizer_map: Optional[str] = None
+
+    # DeepSeek-V4.1 DSpark. This is intentionally separate from mtp_num_layers:
+    # DSpark drafts a block in parallel and adds Markov/confidence heads, whereas
+    # Megatron MTP predicts successive tokens autoregressively.
+    dspark_num_layers: Optional[int] = None
+    dspark_block_size: int = 0
+    dspark_noise_token_id: Optional[int] = None
+    dspark_target_layer_ids: Optional[List[int]] = None
+    dspark_markov_rank: Optional[int] = None
+    dspark_num_experts: Optional[int] = None
+    dspark_router_topk: Optional[int] = None
+
+    # mtp
+    mtp_decoder_input_detach: bool = False
+    # Allow a full-finetune checkpoint that carries no MTP weights to random-init them.
+    # Off by default: a missing MTP key set is usually a wrong path/name, not intent.
+    mtp_allow_random_init: bool = False
+    mtp_shared_weights: Optional[bool] = None
+
+    # visual
+    language_model_only: bool = False
+    hf_config: Optional[PretrainedConfig] = None
+    vit_attn_impl: Optional[str] = None  # e.g. 'flash_attention_2'
+
+    # Override
+    perform_initialization: bool = False
+    apply_query_key_layer_scaling: Optional[bool] = None
+    moe_router_dtype: Literal['none', 'fp32', 'fp64'] = 'fp32'
+    moe_token_dispatcher_type: Literal['allgather', 'alltoall', 'flex'] = 'alltoall'
+    moe_grouped_gemm: bool = True
+    variable_seq_lengths: bool = True
+
+    overlap_p2p_comm: bool = True
+    persist_layer_norm: bool = True
+    deallocate_pipeline_outputs: bool = True
+    cp_comm_type: str = 'p2p'
+
+    # other
+    task_type: Literal['causal_lm', 'seq_cls', 'embedding', 'generative_reranker'] = 'causal_lm'
+    num_labels: Optional[int] = None
+    mlp_padding_free: bool = False
+
+    def __post_init__(self):
+        from mcore_bridge.model import get_mcore_model_type, get_model_meta
+        self._format_config()
+        if self.hf_model_type == 'glm5_next':
+            from mcore_bridge.model.mm_gpts.glm5_next import require_glm5_hybrid
+            require_glm5_hybrid()
+        if self.experimental_attention_variant is not None:
+            require_version('megatron-core>=0.16.0.dev',
+                            'experimental attention variant requires megatron-core>=0.16.0')
+        if isinstance(self.moe_router_dtype, str) and self.moe_router_dtype.lower() == 'none':
+            self.moe_router_dtype = None
+        if self.moe_shared_expert_intermediate_size == 0:
+            self.moe_shared_expert_intermediate_size = None
+        if self.num_moe_experts is not None:
+            if self.moe_ffn_hidden_size is None:
+                self.moe_ffn_hidden_size = self.ffn_hidden_size
+        if self.moe_router_enable_vl_bias:
+            if not self.moe_router_enable_expert_bias:
+                raise ValueError('VL expert bias requires moe_router_enable_expert_bias.')
+            if self.image_token_id is None:
+                raise ValueError('VL expert bias requires image_token_id.')
+        if self.rope_scaling is not None:
+            self.rope_scaling = json_parse_to_dict(self.rope_scaling)
+            if 'type' in self.rope_scaling and 'rope_type' not in self.rope_scaling:
+                self.rope_scaling['rope_type'] = self.rope_scaling['type']
+
+        if self.add_bias_linear:
+            self.add_qkv_bias = True
+        self.actual_vocab_size = self.padded_vocab_size
+        if self.overlap_p2p_comm:
+            self.batch_p2p_comm = False
+        if self.swiglu:
+            self.activation_func = F.silu
+            self.gated_linear_unit = True
+        if self.quick_geglu:
+            # megatron-core>=0.14.0
+            try:
+                from megatron.core.fusions.fused_bias_geglu import quick_gelu
+            except ImportError:
+                from megatron.core.activations import quick_gelu
+            assert not self.swiglu
+            self.gated_linear_unit = True
+            self.activation_func = quick_gelu
+        if self.pipeline_dtype is None:
+            self.pipeline_dtype = self.params_dtype
+        if self.apply_query_key_layer_scaling is None:
+            self.apply_query_key_layer_scaling = self.fp16
+        if self.apply_query_key_layer_scaling:
+            os.environ['NVTE_APPLY_QK_LAYER_SCALING'] = '1'
+        # mtp_num_layers is always the *logical* prediction depth.
+        # mtp_shared_weights is a deprecated alias for mtp_use_repeated_layer.
+        if isinstance(self.mtp_num_layers, str):
+            raise TypeError('mtp_num_layers must be an int or None; '
+                            'use resolve_mtp_config() to resolve "auto".')
+        if self.mtp_shared_weights:
+            assert self.mtp_num_layers is not None and self.mtp_num_layers > 0, \
+                'mtp_shared_weights requires a positive mtp_num_layers'
+            if not hasattr(self, 'mtp_use_repeated_layer'):
+                # COMPAT(0.16): the field does not exist yet; the block provides the shim.
+                object.__setattr__(self, 'mtp_use_repeated_layer', True)
+            else:
+                self.mtp_use_repeated_layer = True
+        elif not hasattr(self, 'mtp_use_repeated_layer'):
+            object.__setattr__(self, 'mtp_use_repeated_layer', False)
+        if (self.mtp_use_repeated_layer and self.pipeline_model_parallel_layout is not None
+                and (self.mtp_num_layers or 0) > 1
+                and 'mtp_use_repeated_layer' not in TransformerConfig.__dataclass_fields__):
+            # MCore 0.16 only: its layout assert counts MTP entries against
+            # config.mtp_num_layers (the LOGICAL depth) while the bridge
+            # repeated-layer shim physically builds ONE layer -- with depth>1
+            # no consistent layout mapping exists.  Depth 1 is conflict-free
+            # (logical == physical == 1, the pre-migration behaviour) and stays
+            # allowed.  Note for 0.17+: upstream supports repeated layers
+            # natively but its layout assert still requires the custom layout
+            # to declare the LOGICAL depth in MTP entries; layouts written for
+            # the old shared semantics (one physical entry) must be updated
+            # accordingly -- upgrading alone does not remap them.
+            raise ValueError('mtp_shared_weights with mtp_num_layers > 1 and a custom '
+                             'pipeline_model_parallel_layout is not supported on megatron-core 0.16: '
+                             'the upstream layout assert counts MTP entries against the logical depth '
+                             'while the repeated-layer shim builds one physical layer. Use depth 1, '
+                             'drop the custom layout, or use megatron-core >= 0.17 with a layout that '
+                             'declares mtp_num_layers MTP entries.')
+        # Legacy alias kept for downstream code that still reads it
+        self.mtp_unroll_steps = self.mtp_num_layers
+        # ``num_nextn_predict_layers`` counts the draft layers for both DeepSeek's standard MTP and
+        # V4.1's DSpark, so it alone cannot tell them apart: on a plain V3/V4 checkpoint it means MTP
+        # and there is no DSpark at all. ``dspark_block_size`` is what actually marks a DSpark
+        # checkpoint (V4.1-Flash and the V4 Vision experiment carry it; plain V4-Flash does not).
+        if not self.dspark_block_size:
+            self.dspark_num_layers = None
+        if self.dspark_block_size:
+            required_dspark = {
+                'dspark_num_layers': self.dspark_num_layers,
+                'dspark_block_size': self.dspark_block_size,
+                'dspark_noise_token_id': self.dspark_noise_token_id,
+                'dspark_target_layer_ids': self.dspark_target_layer_ids,
+                'dspark_markov_rank': self.dspark_markov_rank,
+            }
+            missing_dspark = [name for name, value in required_dspark.items() if value is None]
+            if missing_dspark:
+                raise ValueError(f'DSpark config is missing required fields: {missing_dspark}.')
+            if self.dspark_num_layers <= 0 or self.dspark_block_size <= 0 or self.dspark_markov_rank <= 0:
+                raise ValueError('DSpark layer count, block size and Markov rank must all be positive.')
+            if not self.dspark_target_layer_ids:
+                raise ValueError('DSpark requires at least one target layer ID.')
+            if len(set(self.dspark_target_layer_ids)) != len(self.dspark_target_layer_ids):
+                raise ValueError('DSpark target layer IDs must be unique.')
+            if min(self.dspark_target_layer_ids) < 0 or max(self.dspark_target_layer_ids) >= self.num_layers:
+                raise ValueError('DSpark target layer IDs must refer to decoder layers.')
+            if self.dspark_noise_token_id < 0 or self.dspark_noise_token_id >= self.padded_vocab_size:
+                raise ValueError('DSpark noise token ID must be inside the padded vocabulary.')
+            # The draft stack's own expert counts are optional -- a checkpoint that omits them (as the
+            # V4 Vision experiment does) means its draft layers reuse the backbone's MoE shape, which
+            # is where the builder falls back to.
+            if self.dspark_num_experts is not None and self.dspark_router_topk is not None:
+                if self.dspark_num_experts <= 0 or not 0 < self.dspark_router_topk <= self.dspark_num_experts:
+                    raise ValueError('DSpark router top-k must be positive and no larger than its expert count.')
+        if self.csa_compress_ratios is not None and self.mtp_num_layers is not None:
+            self.csa_compress_ratios += [0] * self.mtp_num_layers
+        if self.multi_latent_attention:
+            if self.attention_latent_norm_epsilon is None:
+                self.attention_latent_norm_epsilon = self.layernorm_epsilon
+            # multi_latent_attention always uses interleave, which corresponds to is_neox_style=False.
+            # deepseek-v32: interleave + non-interleave (indexer)
+            # glm-5: interleave + interleave (indexer)
+            self.rotary_interleaved = False
+        super().__post_init__()
+
+        self._check_npu()
+        if self.mcore_model_type is None:
+            self.mcore_model_type = get_mcore_model_type(self.hf_model_type)
+        self.model_meta = get_model_meta(self.mcore_model_type)
+        self.is_multimodal = self.model_meta.visual_cls is not None
+        if self.is_multimodal and not self.language_model_only:
+            self.test_mm_type = getattr(self.model_meta.visual_cls, 'test_mm_type', 'image')
+        else:
+            self.test_mm_type = 'text'
+        if self.is_multimodal and self.hf_config is None:
+            raise ValueError('Multimodal model must specify hf_config.')
+        self.is_moe_model = self.num_moe_experts is not None
+        self.bridge = self.model_meta.bridge_cls(self)
+
+    def _format_config(self):
+        if self.window_size is not None:
+            self.window_size = tuple_type(self.window_size)
+        if self.window_attn_skip_freq is not None:
+            self.window_attn_skip_freq = moe_freq_type(self.window_attn_skip_freq)
+        if self.no_rope_freq is not None:
+            self.no_rope_freq = no_rope_freq_type(self.no_rope_freq)
+        if self.moe_layer_freq is not None:
+            self.moe_layer_freq = moe_freq_type(self.moe_layer_freq)
+        if self.linear_attention_freq is not None:
+            self.linear_attention_freq = linear_attn_freq_type(self.linear_attention_freq)
+            if isinstance(self.linear_attention_freq, int):
+                self.linear_attention_freq = [
+                    0 if ((i + 1) % self.linear_attention_freq == 0) else 1 for i in range(self.num_layers)
+                ]
+
+    def _check_npu(self):
+        MAX_NPU_EXPERTS_PER_EP = 128
+        num_experts = self.num_moe_experts
+        expert_model_parallel_size = mpu.get_expert_model_parallel_world_size()
+        if is_torch_npu_available() and num_experts and num_experts > MAX_NPU_EXPERTS_PER_EP:
+            required_ep = (num_experts + MAX_NPU_EXPERTS_PER_EP - 1) // MAX_NPU_EXPERTS_PER_EP
+            if expert_model_parallel_size < required_ep:
+                logger.warning(f'{">" * 20} WARNING {"<" * 20}\n'
+                               f'NPU grouped matmul supports up to {MAX_NPU_EXPERTS_PER_EP} experts per EP group. '
+                               f'num_experts={num_experts}, '
+                               f'expert_model_parallel_size={expert_model_parallel_size}. '
+                               f'Please set expert_model_parallel_size (EP) to {required_ep} '
+                               f'(num_experts / {MAX_NPU_EXPERTS_PER_EP}) or higher.')
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+        memo[id(self)] = new_obj
+        for k, v in self.__dict__.items():
+            if k == 'bridge':
+                setattr(new_obj, k, v)
+            else:
+                setattr(new_obj, k, copy.deepcopy(v, memo))
+        return new_obj
+
+
+@dataclass
+class MLAModelConfig(ModelConfig, MLATransformerConfig):
+    """ModelConfig variant for models requiring native Megatron MLA semantics."""

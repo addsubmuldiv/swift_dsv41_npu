@@ -1,0 +1,187 @@
+#!/bin/bash
+# TransformerEngineNPU 基础训练 ST 用例
+# 需要 MegatronAdaptor + Megatron-LM + TransformerEngineNPU 三件套协同运行，
+# 需在 Megatron-LM 目录下执行（pretrain_gpt.py 及输出目录以当前工作目录为基准）。
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+source "${SCRIPT_DIR}/../env_npu.sh"
+export STREAMS_PER_DEVICE=32
+
+NPUS_PER_NODE=8
+MASTER_ADDR=localhost
+MASTER_PORT=6000
+NNODES=1
+NODE_RANK=0
+WORLD_SIZE=$(($NPUS_PER_NODE*$NNODES))
+
+CKPT_DIR=./ckpt_llama
+DATA_PATH="/home/dataset/llama2/alpaca_text_document"
+TOKENIZER_MODEL="/home/dataset/model/llama-2-7b-hf/tokenizer.model"
+
+TP=2
+PP=2
+CP=1
+EP=1
+
+DISTRIBUTED_ARGS="
+    --nproc_per_node $NPUS_PER_NODE \
+    --nnodes $NNODES \
+    --node_rank $NODE_RANK \
+    --master_addr $MASTER_ADDR \
+    --master_port $MASTER_PORT
+"
+
+# Activation function
+ACT_ARGS=(
+    --openai-gelu
+)
+
+# Mixed precision
+MIX_PRC_ARGS=(
+    --bf16 \
+    --first-last-layers-bf16 \
+    --num-layers-at-start-in-bf16 0 \
+    --num-layers-at-end-in-bf16 1 \
+    --grad-reduce-in-bf16 \
+    --disable-bf16-reduced-precision-matmul \
+    --attention-softmax-in-fp32 \
+    --hysteresis 2 \
+)
+
+# Normalization
+NORM_ARGS=(
+    --normalization LayerNorm \
+    --apply-residual-connection-post-layernorm \
+    --no-persist-layer-norm
+)
+
+# Network size
+NET_SIZE_ARGS=(
+    --hidden-size 1024 \
+    --ffn-hidden-size 4000 \
+    --num-layers 4 \
+    --num-attention-heads 16 \
+    --num-query-groups 8 \
+    --kv-channels 64
+)
+
+# Loss
+LOSS_ARGS=(
+    --initial-loss-scale 4096
+)
+
+# Learning rate schedule
+LR_SCHED_ARGS=(
+    --lr 1.0e-6 \
+    --min-lr 1.0e-7 \
+    --lr-decay-style cosine \
+    --lr-warmup-fraction 0.01
+)
+
+# 并行策略
+PARAL_ARGS=(
+    --sequence-parallel \
+    --pipeline-model-parallel-size ${PP} \
+    --num-layers-per-virtual-pipeline-stage 1 \
+    --tensor-model-parallel-size ${TP} \
+)
+
+# 重计算
+RECOMPUTE_ARGS=(
+    --recompute-granularity full \
+    --recompute-method block \
+    --recompute-num-layers 2
+)
+
+# 分布式优化器
+DIST_OPT_ARGS=(
+    --use-distributed-optimizer
+)
+
+# Checkpoint
+CKPT_ARGS=(
+    --save ${CKPT_DIR} \
+    --ckpt-format torch \
+    --save-interval 10
+)
+
+BASE_ARGS=(
+    --transformer-impl transformer_engine \
+    --q-lora-rank 1536 \
+    --kv-lora-rank 512 \
+    --qk-head-dim 128 \
+    --qk-pos-emb-head-dim 64 \
+    --v-head-dim 128 \
+    --use-flash-attn \
+    --tokenizer-type Llama2Tokenizer \
+    --tokenizer-model ${TOKENIZER_MODEL} \
+    --seq-length 2048 \
+    --max-position-embeddings 4096 \
+    --micro-batch-size 1 \
+    --global-batch-size 4 \
+    --make-vocab-size-divisible-by 1 \
+    --train-iters 1000 \
+    --untie-embeddings-and-output-weights \
+    --attention-dropout 0.0 \
+    --init-method-std 0.01 \
+    --hidden-dropout 0.0 \
+    --position-embedding-type rope \
+    --no-masked-softmax-fusion \
+    --weight-decay 0.1 \
+    --clip-grad 1.0 \
+    --adam-beta1 0.9 \
+    --adam-beta2 0.95 \
+    --adam-eps 1e-5 \
+    --group-query-attention \
+    --seed 42
+    --deterministic-mode
+    --use-cpu-initialization
+    --rampup-batch-size 4 4 10
+    --eval-micro-batch-size 1
+    --eval-global-batch-size 4
+)
+
+DATA_ARGS=(
+    --data-path ${DATA_PATH} \
+    --split 949,50,1
+)
+
+mkdir -p ${CKPT_DIR}  # log-params-norm requires this directory to exist
+OUTPUT_ARGS=(
+    --log-throughput \
+    --log-interval 1 \
+    --log-params-norm \
+    --log-progress \
+    --save-interval 10000 \
+    --eval-interval 50 \
+    --eval-iters 10
+    --tensorboard-dir ./tb_logs
+    --tensorboard-log-interval 1
+    --tensorboard-queue-size 1000
+    --log-timers-to-tensorboard
+    --no-log-loss-scale-to-tensorboard
+    --log-validation-ppl-to-tensorboard
+    --log-memory-to-tensorboard
+    --log-memory-interval 1
+    --log-world-size-to-tensorboard
+)
+
+torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
+    ${ACT_ARGS[@]} \
+    ${MIX_PRC_ARGS[@]} \
+    ${NET_SIZE_ARGS[@]} \
+    ${NORM_ARGS[@]} \
+    ${LOSS_ARGS[@]} \
+    ${LR_SCHED_ARGS[@]} \
+    ${PARAL_ARGS[@]} \
+    ${RECOMPUTE_ARGS[@]} \
+    ${DIST_OPT_ARGS[@]} \
+    ${CKPT_ARGS[@]} \
+    ${BASE_ARGS[@]} \
+    ${DATA_ARGS[@]} \
+    ${OUTPUT_ARGS[@]} \
+    --exit-interval 10
+
+set +x

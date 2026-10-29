@@ -1,0 +1,124 @@
+name: transformer_engine.pytorch.permutation.moe_sort_chunks_by_index_with_probs
+api: pytorch
+api_type: function_moe_sort_chunks_by_index_with_probs
+# Single route (2026-09-18): the hook generator replaces the curated P0 matrix.
+# This module keeps one generator only, so this field and the `atk case -p`
+# argument point at the same file.
+generate: generate_moe_sort_chunks_by_index_with_probs_hook
+backward: false
+standard:
+  acc:
+    moe_sort_chunks_by_index_with_probs_allclose:
+      bf16_rtol: 1.56e-2
+      bf16_atol: 1.56e-2
+# ---
+# The fields from here on are consumed by the HOOK route.
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: empty / 0-D inputs are UNTESTED for this module — keep every
+# flag off (a 0-token input degenerates the chunk split).
+extra_numbers: 0
+# Element-scale quota. The default bands (>=10M/100M/1G) are unreachable at
+# these shapes; the threshold sits in the low-density tail of the 2-D pool
+# product instead.
+shape_distributions:
+  # 阈值放到尾部（对齐 layernorm.yaml 的 2^32-1 口径）：声明的阈值会被 ATK 按
+  # sum(max_length)/(2^32 x 输入数) 缩放，落回高密度区会让配额立刻溢出、进而对
+  # 所有 tensor 的 max_length 减半，直到某个占位槽跌破其池的最小乘积 → 无界拒绝
+  # 循环（2026-09-18 rope 上实测复现）。
+  - [4294967295, 0.4]
+inputs:
+  # inp: token hidden states, [num_tokens, hidden_size]. Both dims sample from
+  # the same pool; T is what the rendered split must sum to and what probs /
+  # dy_probs are indexed by.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048, 4096, 8192]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # probs: one probability per token, [num_tokens]; permuted with the same
+  # row_id_map as inp. Shape derived by the hook; raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy: grad_output for the sorted tokens; mirrors inp. Pinned placeholder.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy_probs: grad_output for the permuted probabilities; mirrors probs.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # split_spec: the chunk-size STYLE, "<pattern>:<num_chunks>". The real
+  # `split_spec` string (",".-joined sizes summing to T) is rendered by the
+  # hook, because T is sampled in slot 0 and a literal spec can never match it.
+  # Patterns keep the curated matrix's coverage: uniform (which degenerates to
+  # one-token chunks when num_chunks == T, e.g. uniform:8 with T=8), uneven,
+  # skewed (router collapse) and one empty chunk.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: ["uniform:2", "uniform:4", "uniform:8", "uniform:16",
+                 "uneven:3", "uneven:8", "skewed:4", "skewed:8",
+                 "one_empty:5", "one_empty:8"]
+  # sorted_spec: the chunk-permutation STYLE; the real `sorted_spec` (a
+  # non-identity permutation of 0..num_chunks-1, whose length must equal the
+  # split's) is rendered by the hook.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [reverse, rotate, interleave]

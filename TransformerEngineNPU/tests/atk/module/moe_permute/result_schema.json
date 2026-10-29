@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "forward_output",
+    "output_1.pt": "inp_grad",
+    "output_2.pt": "row_id_map",
+    "output_3.pt": "api_contract_json_utf8"
+  }
+}

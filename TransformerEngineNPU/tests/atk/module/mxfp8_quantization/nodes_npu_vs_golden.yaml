@@ -1,0 +1,16 @@
+nodes:
+  - backend: npu
+    name: "0"
+    devices: [0]
+    task: [accuracy]
+    output_path: ./atk_mxfp8_quantization_output
+  # Golden-free guard: this CPU node loads the CPU-computed reference
+  # artifacts produced by collect_cpu_reference.py (pure math: the input
+  # itself for round-trip, exact canonical scales for canonicity). It is NOT
+  # an NVTE golden — NVTE's MXFP8 kernels require SM100 (Blackwell), which
+  # the intranet does not have. Replacing this artifact set with a real NVTE
+  # golden later requires only re-collecting with collect_nvte_golden.py.
+  - backend: cpu
+    name: nvte
+    task: [accuracy_load]
+    output_path: ./mxfp8_quantization_reference

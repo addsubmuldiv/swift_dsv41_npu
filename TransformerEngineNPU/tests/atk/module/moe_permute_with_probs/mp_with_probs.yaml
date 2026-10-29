@@ -1,0 +1,136 @@
+name: transformer_engine.pytorch.permutation.moe_permute_with_probs
+api: pytorch
+api_type: function_moe_permute_with_probs
+# Single route (2026-09-20): the hook generator replaces the curated P0 matrix.
+# This module keeps one generator only, so this field and the `atk case -p`
+# argument point at the same file.
+generate: generate_mp_with_probs_hook
+backward: false
+standard:
+  acc:
+    moe_permute_with_probs_allclose:
+      bf16_rtol: 1.56e-2
+      bf16_atol: 1.56e-2
+# ---
+# The fields from here on are consumed by the HOOK route.
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: empty / 0-D inputs are UNTESTED for this module — every flag off.
+extra_numbers: 0
+# Element-scale quota: threshold in the low-density tail (see GENERALIZATION
+# §5.3 — a scaled-back threshold lands in the density bulge and the halving
+# spiral deadlocks).
+shape_distributions:
+  - [4294967295, 0.4]
+inputs:
+  # inp: token hidden states, [num_tokens, hidden].
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # probs: routing probabilities, [num_tokens, num_experts] — gathered by the
+  # same routing map as inp, so its shape is derived by the hook. The curated
+  # matrix sampled [-0.5, 0.5] here (probs are only permuted, never combined),
+  # so the range stays signed.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy: grad_output for the permuted tokens, [num_out_tokens, hidden].
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy_probs: grad_output for the permuted probabilities, [num_out_tokens].
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # routing_spec: the per-expert allocation STYLE; the real spec string is
+  # rendered by the hook (its row count must equal the sampled token count).
+  #   uniform / uneven / skewed (router collapse) / empty_expert (underloaded)
+  # Dropped tokens (empty rows) are NOT generated: the curated matrix excluded
+  # them and re-adding them failed on device (see the moe_permute hook).
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [uniform, uneven, skewed, empty_expert]
+  # num_experts.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [4, 8, 16, 32, 64, 128]
+  # topk: experts routed per token (clamped to [1, num_experts] by the hook).
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [1, 2, 4, 8]
+  # routing_dtype: "bool" (default) or the legacy "int32" (both accepted by the
+  # adapter on the mask path this module always takes).
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [bool, int32]
+  # num_out_tokens: derived by the hook (tokens * topk, always > 0). Placeholder.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [0]

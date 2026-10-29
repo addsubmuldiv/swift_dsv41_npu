@@ -1,0 +1,124 @@
+name: transformer_engine.pytorch.permutation.moe_permute
+api: pytorch
+api_type: function_moe_permute
+# Single route (2026-09-20): the hook generator replaces the curated P0 matrix.
+# This module keeps one generator only, so this field and the `atk case -p`
+# argument point at the same file.
+generate: generate_moe_permute_hook
+backward: false
+standard:
+  acc:
+    moe_permute_allclose:
+      bf16_rtol: 1.56e-2
+      bf16_atol: 1.56e-2
+# ---
+# The fields from here on are consumed by the HOOK route.
+dtype_numbers: 50  # 3 dtype x 50 = 150 例/种子（泛化口径）
+# Boundary track: empty / 0-D inputs are UNTESTED for this module — keep every
+# flag off (a 0-token input has no routing rows).
+extra_numbers: 0
+# Element-scale quota: threshold in the low-density tail (see GENERALIZATION
+# §5.3 — a scaled-back threshold lands in the density bulge and the halving
+# spiral deadlocks).
+shape_distributions:
+  - [4294967295, 0.4]
+inputs:
+  # inp: token hidden states, [num_tokens, hidden]. Both dims sample from the
+  # same pool; the row count is what the rendered routing_spec must cover.
+  - type: tensor
+    dtypes:
+      values: [bf16, fp16, fp32]
+    ranges:
+      valid:
+        # 值域泛化：宽区间 + 近零小区间，每条例等概率取其一（多区间 values 池）。
+        values: [ [ -5, 5 ], [ -0.001, 0.001 ] ]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 33554432
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy: grad_output, [num_out_tokens, hidden]. Shape is derived by the hook from
+  # the routing spec; raw sampling pinned to a minimal placeholder.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # map_type: "mask" (0/1 routing map) or "index" (expert-index columns).
+  # String attrs must keep an explicit value set — unknown values fail fast.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [mask, index]
+  # routing_spec: the per-expert allocation STYLE. The real spec string
+  # (';'-joined per-row targets, ','-separated within a row) is rendered by the
+  # hook, because its row count must equal the sampled token count — a literal
+  # spec can never match it.
+  #   uniform      — even router split
+  #   uneven       — +/-3% sawtooth (load imbalance)
+  #   skewed       — one expert takes ~60% (router collapse)
+  #   empty_expert — two experts get nothing (underloaded experts)
+  # Dropped tokens (empty spec rows) are deliberately NOT generated: the curated
+  # matrix excluded them, and re-adding them failed on device (see the hook).
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [uniform, uneven, skewed, empty_expert]
+  # num_experts.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [4, 8, 16, 32, 64, 128]
+  # topk: experts routed per token (clamped to [1, num_experts] by the hook).
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [1, 2, 4, 8]
+  # routing_dtype: "bool" (default) or the legacy "int32" for mask; the index
+  # path is reconciled to int32 by the hook (the adapter raises otherwise).
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [bool, int32]
+  # num_out_tokens: output buffer rows. Derived by the hook — mask: routed
+  # tokens * topk (> 0); index: 0 ("infer"). The pool is a placeholder.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [0]
+  # max_token_num: workspace sizing hint (index only); the curated matrix used
+  # the -1 default.
+  - type: attr
+    dtypes:
+      values: [int]
+    ranges:
+      valid:
+        values: [-1]

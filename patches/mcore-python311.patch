@@ -1,0 +1,39 @@
+diff --git a/megatron/training/models/gpt.py b/megatron/training/models/gpt.py
+index f744d43fb..b9454336c 100644
+--- a/megatron/training/models/gpt.py
++++ b/megatron/training/models/gpt.py
+@@ -2,9 +2,10 @@
+ 
+ import inspect
+ import logging
+-from typing import Any, Callable, ClassVar, Literal, override
++from typing import Any, Callable, ClassVar, Literal
+ 
+ import torch
++from typing_extensions import override
+ 
+ from megatron.core.distributed.distributed_data_parallel_config import DistributedDataParallelConfig
+ from megatron.core.enums import ModelType
+diff --git a/megatron/training/models/hybrid.py b/megatron/training/models/hybrid.py
+index 53e716653..6d8c0d7f5 100644
+--- a/megatron/training/models/hybrid.py
++++ b/megatron/training/models/hybrid.py
+@@ -2,12 +2,16 @@
+ 
+ import logging
+ from dataclasses import dataclass
+-from typing import Any, Callable, ClassVar, Literal, override
++from typing import Any, Callable, ClassVar, Literal
++
++from typing_extensions import override
+ 
+ from megatron.core.distributed.distributed_data_parallel_config import DistributedDataParallelConfig
+ from megatron.core.enums import ModelType
+ from megatron.core.models.engram import EngramConfig, apply_engram_to_hybrid_stack_spec
+-from megatron.core.models.hybrid.hybrid_layer_specs import hybrid_inference_stack_spec
++from megatron.core.models.hybrid.hybrid_layer_specs import (
++    hybrid_inference_stack_spec,
++)
+ from megatron.core.models.hybrid.hybrid_layer_specs import (
+     hybrid_stack_spec as default_hybrid_stack_spec,
+ )

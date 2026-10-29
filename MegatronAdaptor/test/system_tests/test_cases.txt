@@ -1,0 +1,20 @@
+# ST用例注册文件：每行一个用例脚本名，按文件顺序执行
+# 以 # 开头的行为注释，需要禁用的用例直接注释掉即可
+
+test_activation_variants.sh
+test_attention.sh
+test_basic_training.sh
+test_checkpoint_advanced.sh
+test_checkpoint_convert.sh
+test_context_parallel.sh
+test_cpu_offload.sh
+test_emerging_optimizers.sh
+# test_fp8.sh  # FP8 需要 Ascend 950(A5)，910B 不支持
+test_fp16_precision.sh
+test_hybrid_model_features.sh
+test_moe.sh
+test_mup.sh
+test_optimizers.sh
+test_recompute.sh
+test_tokenizer_dataset.sh
+test_ma_npu_features.sh

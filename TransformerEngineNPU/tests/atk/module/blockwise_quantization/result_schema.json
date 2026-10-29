@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "dequant_rowwise",
+    "output_1.pt": "dequant_columnwise",
+    "output_2.pt": "cross_consistency",
+    "output_3.pt": "scale_rowwise_logical",
+    "output_4.pt": "scale_columnwise_logical",
+    "output_5.pt": "api_contract_json_utf8"
+  }
+}

@@ -1,0 +1,174 @@
+name: transformer_engine.pytorch.Linear
+api: pytorch
+api_type: function_te_linear
+# Dual-route iteration: default = full-build generator (generate_linear.py,
+# curated two-tier matrix, golden-compatible; ignores the sampling fields
+# below except x's dtypes). The hook-route candidate lives in
+# generate_linear_hook.py — to switch, change this field to
+# `generate_te_linear_hook` AND pass `-p .../generate_linear_hook.py` to
+# `atk case`. Once the hook route is validated, generate_linear.py gets
+# deleted (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_te_linear_p0
+backward: false
+standard:
+  acc:
+    # Standard mixed-tolerance thresholds (2-ULP bf16 + near-zero abs/ULP
+    # backstop). A single GEMM cross-implementation is nearly bit-identical,
+    # but dot products that cancel to near zero blow MARE's max gate with
+    # large relative errors (same signature as layernorm/rope, REPORT atk
+    # 3#11/3#16); mixed_tolerance judges those by absolute error instead.
+    linear_mixed_tolerance:
+      bf16_rtol: 0.0156
+      bf16_atol: 0.0156
+      bf16_required_matched_ratio: 0.99
+      bf16_max_abs_error_limit: 1.0
+      bf16_max_ulp_multiple: 32
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: threshold sits in the pool-product low-density tail;
+# the ATK default (30% >=10M) is unreachable at this scale and burns the
+# full reshape-retry budget — or deadlocks via the cap-halving spiral.
+# See GENERALIZATION.md §5.3 for the design rules.
+shape_distributions:
+  - [1048576, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores —
+# its matrix is fixed). dtypes [bf16] x 10 keeps a comparable baseline;
+# raise it (e.g. 50) for sampling volume.
+dtype_numbers: 10
+# Boundary track switch: 0 keeps the default baseline off; tests may flip
+# to 'all' — category selection is per-input boundary flags below. With
+# this yaml's flags (empty/infnan/scalar off) the track yields only
+# lower/upper VALUE-border cases, which are legal; contract-illegal ones
+# fail fast at generation with an actionable error from the hook guard.
+extra_numbers: 0
+inputs:
+  # inp — really sampled on the hook route. NOTE: unlike the norm family,
+  # 0-ROW inputs (zero leading dim) are legal for Linear; the sampling pool
+  # has no 0 values, so the template never draws them (the curated
+  # full-build matrix covers the 0-row branch explicitly).
+  # Determinism: same yaml + `atk case -s 1234` (CLI default seed) + same
+  # ATK version ⇒ identical cases.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3, 4]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # weight — SEMI-live: native sampling draws a 2-D [out, in_raw] shape
+  # from this pool; the hook keeps the FIRST dim (out_features) and forces
+  # the second to inp's last dim. This is the only free dimension in the
+  # module's coupling graph.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # bias_value — range live, shape/dtype patched to [out_features].
+  # Raw sampling pinned minimal; dead input when bias_enabled=False.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # grad_output — range live, shape/dtype patched to
+  # inp.shape[:-1] + [out_features]. Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # grad_returned_bias — range live, shape/dtype patched to [out_features]
+  # (te.Linear returns the bias vector itself). Dead input unless
+  # return_bias=True and consume_returned_bias=True.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # bias_enabled — module bias parameter on/off.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # return_bias — module returns the bias vector alongside the output.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # consume_returned_bias — grad_returned_bias participates in the loss.
+  - type: attr
+    dtypes:
+      values: [attr_bool]
+    ranges:
+      valid:
+        values: [true, false]
+  # split_kind — parameters_split shape: none / tuple2 (requires EVEN
+  # out_features; the hook reconciles a sampled odd out to even) / dict2
+  # (any out, uneven split allowed). Boolean/string attrs must keep an
+  # explicit value set — ATK's numeric fallback range [-5, 5] does not
+  # match their semantics.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values: [none, tuple2, dict2]

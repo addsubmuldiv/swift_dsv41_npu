@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "topk": {
+      "output_0.pt": "probs_sparse_row_sorted_index_free",
+      "output_1.pt": "probs_masked_row_sorted_index_free",
+      "output_2.pt": "grad_logits",
+      "output_3.pt": "api_contract_json_utf8"
+    },
+    "score": {
+      "output_0.pt": "scores_fp32",
+      "output_1.pt": "scores_masked_row_sorted_index_free",
+      "output_2.pt": "grad_logits",
+      "output_3.pt": "api_contract_json_utf8"
+    },
+    "aux_loss": {
+      "output_0.pt": "probs",
+      "output_1.pt": "aux_loss_scalar",
+      "output_2.pt": "grad_probs",
+      "output_3.pt": "api_contract_json_utf8"
+    }
+  }
+}

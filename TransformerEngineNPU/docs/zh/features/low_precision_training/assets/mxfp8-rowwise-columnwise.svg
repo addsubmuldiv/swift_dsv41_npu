@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="450" viewBox="0 0 900 450" font-family="Microsoft YaHei, Noto Sans CJK SC, PingFang SC, sans-serif">
+  <rect width="900" height="450" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text x="450" y="42" text-anchor="middle" font-size="20" font-weight="bold" fill="#263238">Rowwise 与 Columnwise：同一个元素属于不同的块</text>
+
+  <!-- 左面板：Rowwise -->
+  <rect x="40" y="72" width="400" height="352" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="240" y="100" text-anchor="middle" font-size="14" font-weight="bold" fill="#0d47a1">Rowwise：沿 K 方向分块（1×32）</text>
+  <g stroke="#90a4ae" stroke-width="0.75" fill="#ffffff">
+    <rect x="66" y="116" width="24" height="24"/><rect x="92" y="116" width="24" height="24"/><rect x="118" y="116" width="24" height="24"/><rect x="144" y="116" width="24" height="24"/><rect x="170" y="116" width="24" height="24"/><rect x="196" y="116" width="24" height="24"/><rect x="222" y="116" width="24" height="24"/><rect x="248" y="116" width="24" height="24"/><rect x="274" y="116" width="24" height="24"/><rect x="300" y="116" width="24" height="24"/><rect x="326" y="116" width="24" height="24"/><rect x="352" y="116" width="24" height="24"/>
+    <rect x="66" y="142" width="24" height="24"/><rect x="92" y="142" width="24" height="24"/><rect x="118" y="142" width="24" height="24"/><rect x="144" y="142" width="24" height="24"/><rect x="170" y="142" width="24" height="24"/><rect x="196" y="142" width="24" height="24"/><rect x="222" y="142" width="24" height="24"/><rect x="248" y="142" width="24" height="24"/><rect x="274" y="142" width="24" height="24"/><rect x="300" y="142" width="24" height="24"/><rect x="326" y="142" width="24" height="24"/><rect x="352" y="142" width="24" height="24"/>
+    <rect x="66" y="168" width="24" height="24"/><rect x="92" y="168" width="24" height="24"/><rect x="118" y="168" width="24" height="24"/><rect x="144" y="168" width="24" height="24"/><rect x="170" y="168" width="24" height="24"/><rect x="196" y="168" width="24" height="24"/><rect x="222" y="168" width="24" height="24"/><rect x="248" y="168" width="24" height="24"/><rect x="274" y="168" width="24" height="24"/><rect x="300" y="168" width="24" height="24"/><rect x="326" y="168" width="24" height="24"/><rect x="352" y="168" width="24" height="24"/>
+    <rect x="66" y="194" width="24" height="24"/><rect x="92" y="194" width="24" height="24"/><rect x="118" y="194" width="24" height="24"/><rect x="144" y="194" width="24" height="24"/><rect x="170" y="194" width="24" height="24"/><rect x="196" y="194" width="24" height="24"/><rect x="222" y="194" width="24" height="24"/><rect x="248" y="194" width="24" height="24"/><rect x="274" y="194" width="24" height="24"/><rect x="300" y="194" width="24" height="24"/><rect x="326" y="194" width="24" height="24"/><rect x="352" y="194" width="24" height="24"/>
+    <rect x="66" y="220" width="24" height="24"/><rect x="92" y="220" width="24" height="24"/><rect x="118" y="220" width="24" height="24"/><rect x="144" y="220" width="24" height="24"/><rect x="170" y="220" width="24" height="24"/><rect x="196" y="220" width="24" height="24"/><rect x="222" y="220" width="24" height="24"/><rect x="248" y="220" width="24" height="24"/><rect x="274" y="220" width="24" height="24"/><rect x="300" y="220" width="24" height="24"/><rect x="326" y="220" width="24" height="24"/><rect x="352" y="220" width="24" height="24"/>
+    <rect x="66" y="246" width="24" height="24"/><rect x="92" y="246" width="24" height="24"/><rect x="118" y="246" width="24" height="24"/><rect x="144" y="246" width="24" height="24"/><rect x="170" y="246" width="24" height="24"/><rect x="196" y="246" width="24" height="24"/><rect x="222" y="246" width="24" height="24"/><rect x="248" y="246" width="24" height="24"/><rect x="274" y="246" width="24" height="24"/><rect x="300" y="246" width="24" height="24"/><rect x="326" y="246" width="24" height="24"/><rect x="352" y="246" width="24" height="24"/>
+  </g>
+  <!-- 块边界（每 3 列一条竖线） -->
+  <g stroke="#1565c0" stroke-width="2.5">
+    <line x1="143" y1="116" x2="143" y2="270"/>
+    <line x1="221" y1="116" x2="221" y2="270"/>
+    <line x1="299" y1="116" x2="299" y2="270"/>
+  </g>
+  <!-- 选中的元素 x 与其行块 -->
+  <rect x="220" y="166" width="80" height="28" rx="3" fill="none" stroke="#2e7d32" stroke-width="2.5"/>
+  <rect x="248" y="168" width="24" height="24" fill="#ffe0b2" stroke="#ef6c00" stroke-width="2.5"/>
+  <text x="260" y="185" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#ef6c00">x</text>
+  <text x="240" y="296" text-anchor="middle" font-size="11.5" fill="#0d47a1">绿色框 = 一个 1×32 块（一行中连续的 32 个元素）</text>
+  <text x="240" y="318" text-anchor="middle" font-size="11.5" fill="#37474f">橙色格子 = 选中的元素 x，其缩放因子来自所在行的块</text>
+
+  <!-- 右面板：Columnwise -->
+  <rect x="460" y="72" width="400" height="352" rx="8" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.5"/>
+  <text x="660" y="100" text-anchor="middle" font-size="14" font-weight="bold" fill="#bf360c">Columnwise：沿 M 方向分块（32×1）</text>
+  <g stroke="#90a4ae" stroke-width="0.75" fill="#ffffff">
+    <rect x="486" y="116" width="24" height="24"/><rect x="512" y="116" width="24" height="24"/><rect x="538" y="116" width="24" height="24"/><rect x="564" y="116" width="24" height="24"/><rect x="590" y="116" width="24" height="24"/><rect x="616" y="116" width="24" height="24"/><rect x="642" y="116" width="24" height="24"/><rect x="668" y="116" width="24" height="24"/><rect x="694" y="116" width="24" height="24"/><rect x="720" y="116" width="24" height="24"/><rect x="746" y="116" width="24" height="24"/><rect x="772" y="116" width="24" height="24"/>
+    <rect x="486" y="142" width="24" height="24"/><rect x="512" y="142" width="24" height="24"/><rect x="538" y="142" width="24" height="24"/><rect x="564" y="142" width="24" height="24"/><rect x="590" y="142" width="24" height="24"/><rect x="616" y="142" width="24" height="24"/><rect x="642" y="142" width="24" height="24"/><rect x="668" y="142" width="24" height="24"/><rect x="694" y="142" width="24" height="24"/><rect x="720" y="142" width="24" height="24"/><rect x="746" y="142" width="24" height="24"/><rect x="772" y="142" width="24" height="24"/>
+    <rect x="486" y="168" width="24" height="24"/><rect x="512" y="168" width="24" height="24"/><rect x="538" y="168" width="24" height="24"/><rect x="564" y="168" width="24" height="24"/><rect x="590" y="168" width="24" height="24"/><rect x="616" y="168" width="24" height="24"/><rect x="642" y="168" width="24" height="24"/><rect x="668" y="168" width="24" height="24"/><rect x="694" y="168" width="24" height="24"/><rect x="720" y="168" width="24" height="24"/><rect x="746" y="168" width="24" height="24"/><rect x="772" y="168" width="24" height="24"/>
+    <rect x="486" y="194" width="24" height="24"/><rect x="512" y="194" width="24" height="24"/><rect x="538" y="194" width="24" height="24"/><rect x="564" y="194" width="24" height="24"/><rect x="590" y="194" width="24" height="24"/><rect x="616" y="194" width="24" height="24"/><rect x="642" y="194" width="24" height="24"/><rect x="668" y="194" width="24" height="24"/><rect x="694" y="194" width="24" height="24"/><rect x="720" y="194" width="24" height="24"/><rect x="746" y="194" width="24" height="24"/><rect x="772" y="194" width="24" height="24"/>
+    <rect x="486" y="220" width="24" height="24"/><rect x="512" y="220" width="24" height="24"/><rect x="538" y="220" width="24" height="24"/><rect x="564" y="220" width="24" height="24"/><rect x="590" y="220" width="24" height="24"/><rect x="616" y="220" width="24" height="24"/><rect x="642" y="220" width="24" height="24"/><rect x="668" y="220" width="24" height="24"/><rect x="694" y="220" width="24" height="24"/><rect x="720" y="220" width="24" height="24"/><rect x="746" y="220" width="24" height="24"/><rect x="772" y="220" width="24" height="24"/>
+    <rect x="486" y="246" width="24" height="24"/><rect x="512" y="246" width="24" height="24"/><rect x="538" y="246" width="24" height="24"/><rect x="564" y="246" width="24" height="24"/><rect x="590" y="246" width="24" height="24"/><rect x="616" y="246" width="24" height="24"/><rect x="642" y="246" width="24" height="24"/><rect x="668" y="246" width="24" height="24"/><rect x="694" y="246" width="24" height="24"/><rect x="720" y="246" width="24" height="24"/><rect x="746" y="246" width="24" height="24"/><rect x="772" y="246" width="24" height="24"/>
+  </g>
+  <!-- 块边界（每 3 行一条横线） -->
+  <g stroke="#ef6c00" stroke-width="2.5">
+    <line x1="486" y1="193" x2="796" y2="193"/>
+  </g>
+  <!-- 选中的元素 x 与其列块 -->
+  <rect x="666" y="114" width="28" height="80" rx="3" fill="none" stroke="#2e7d32" stroke-width="2.5"/>
+  <rect x="668" y="168" width="24" height="24" fill="#ffe0b2" stroke="#ef6c00" stroke-width="2.5"/>
+  <text x="680" y="185" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#ef6c00">x</text>
+  <text x="660" y="296" text-anchor="middle" font-size="11.5" fill="#bf360c">绿色框 = 一个 32×1 块（一列中连续的 32 个元素）</text>
+  <text x="660" y="318" text-anchor="middle" font-size="11.5" fill="#37474f">橙色格子 = 同一个元素 x，其缩放因子来自所在列的块</text>
+  <text x="660" y="340" text-anchor="middle" font-size="11" fill="#546e7a">（与左图为同一矩阵、同一个元素）</text>
+</svg>

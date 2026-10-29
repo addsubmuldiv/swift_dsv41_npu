@@ -1,0 +1,72 @@
+{
+  "_comment": "夜间验证流水线评估指标。双轴度量：N001~N004 度量「对不对」，N005~N006 度量「费不费」。",
+  "evals": [
+    {
+      "eval_id": "N001",
+      "name": "nightly_run_success_rate",
+      "description": "overall=pass 的夜间运行比例",
+      "metric": "rate",
+      "threshold": 0.95,
+      "compute": "count_pass / total_runs",
+      "stage": "overall",
+      "auto_check": true,
+      "axis": "correctness"
+    },
+    {
+      "eval_id": "N002",
+      "name": "setup_success_rate",
+      "description": "SETUP 阶段无错误完成的比例",
+      "metric": "rate",
+      "threshold": 0.95,
+      "compute": "count_setup_ok / total_runs",
+      "stage": "setup",
+      "auto_check": true,
+      "axis": "correctness"
+    },
+    {
+      "eval_id": "N003",
+      "name": "test_pass_rate",
+      "description": "通过的个体测试用例比例",
+      "metric": "rate",
+      "threshold": 0.90,
+      "compute": "count_tests_passed / count_tests_run",
+      "stage": "launch",
+      "auto_check": true,
+      "axis": "correctness"
+    },
+    {
+      "eval_id": "N004",
+      "name": "no_false_pass",
+      "description": "检测是否将失败运行错误地标记为通过（需与ground truth比对）",
+      "metric": "boolean",
+      "threshold": true,
+      "compute": "all(failure_detected) for all actual failures",
+      "stage": "verify",
+      "auto_check": true,
+      "axis": "correctness"
+    },
+    {
+      "eval_id": "N005",
+      "name": "report_latency",
+      "description": "流水线总耗时（秒），从 FETCH 到 REPORT 完成",
+      "metric": "latency",
+      "threshold": 3600,
+      "compute": "end_time - start_time",
+      "stage": "overall",
+      "auto_check": true,
+      "axis": "efficiency"
+    },
+    {
+      "eval_id": "N006",
+      "name": "diagnosis_accuracy",
+      "description": "LLM 诊断与根本原因匹配的比例（每次失败后由人工评估）",
+      "metric": "accuracy",
+      "threshold": 0.70,
+      "compute": "count_correct_diagnosis / count_failures_diagnosed",
+      "stage": "diagnose",
+      "auto_check": false,
+      "human_eval": true,
+      "axis": "efficiency"
+    }
+  ]
+}

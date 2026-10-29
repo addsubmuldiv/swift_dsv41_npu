@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "outputs": {
+    "output_0.pt": "params_final",
+    "output_1.pt": "first_moment",
+    "output_2.pt": "second_moment",
+    "output_3.pt": "step_count",
+    "output_4.pt": "api_contract_json_utf8"
+  }
+}

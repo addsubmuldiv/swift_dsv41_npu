@@ -1,0 +1,642 @@
+# Copyright (c) ModelScope Contributors. All rights reserved.
+import copy
+import math
+import megatron.core
+import os
+import torch
+import torch.nn.functional as F
+from collections import OrderedDict
+from megatron.core import mpu, parallel_state
+from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
+from megatron.core.dist_checkpointing.mapping import ShardedStateDict
+from megatron.core.extensions.transformer_engine import TELinear
+from megatron.core.inference.contexts import BaseInferenceContext
+from megatron.core.models.common.embeddings.rotary_pos_embedding import RotaryEmbedding
+from megatron.core.models.common.language_module.language_module import LanguageModule
+from megatron.core.models.gpt import GPTModel as McoreGPTModel
+from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.tensor_parallel.mappings import (copy_to_tensor_model_parallel_region,
+                                                    gather_from_sequence_parallel_region,
+                                                    reduce_from_tensor_model_parallel_region)
+from megatron.core.transformer.multi_token_prediction import tie_word_embeddings_state_dict
+from megatron.core.transformer.spec_utils import ModuleSpec
+from megatron.core.utils import WrappedTensor, deprecate_inference_params
+from packaging import version
+from typing import Optional, Tuple
+
+from mcore_bridge.config import ModelConfig
+from mcore_bridge.utils import get_logger, split_cp_inputs
+
+from .mtp import prepare_mtp_loss_mask, process_mtp_loss_compat
+from .rope import dynamic_rope_update, get_rope_inv_freq
+
+logger = get_logger()
+
+mcore_ge_016 = version.parse(megatron.core.__version__) >= version.parse('0.16.0rc0')
+mcore_ge_019 = version.parse(megatron.core.__version__) >= version.parse('0.19.0rc0')
+
+
+class OutputLayerLinear(TELinear):
+
+    def forward(self, hidden_states, *args, **kwargs):
+        return super().forward(hidden_states)
+
+    def sharded_state_dict(
+            self,
+            prefix: str = '',
+            sharded_offsets: Tuple[Tuple[int, int, int]] = (),
+            metadata: Optional[dict] = None,
+    ) -> ShardedStateDict:
+        res = super().sharded_state_dict(prefix, sharded_offsets, metadata)
+        for k, v in res.items():
+            if k.endswith('._extra_state'):
+                if v.data is not None and v.data.numel() == 0:
+                    v.data = None
+        return res
+
+
+class _MtpOutputLayerProxy:
+    """Output-layer callable handed to ``process_mtp_loss``.
+
+    Applies the model's own logits transform (``_forward_output_layer``:
+    Gemma4 softcap, MuseGlimmer output_multiplier, ...) to the MTP logits so
+    the MTP loss and the main loss share one contract, while exposing the
+    REAL output layer's attributes -- upstream reads ``output_layer.weight``
+    in the ``mtp_detach_heads`` branch (untied weights) and in acceptance
+    counting, which a bare function wrapper would crash on.
+    """
+
+    def __init__(self, model: 'GPTModel'):
+        self._model = model
+
+    def __call__(self, hidden_states, *args, **kwargs):
+        model = self._model
+        if kwargs.get('output_cross_entropy_loss'):
+            # dev fused linear-CE path: no logits are materialized, so a
+            # subclass transform cannot be applied.  Fail loud rather than
+            # silently train an untransformed MTP loss.
+            if type(model)._forward_output_layer is not GPTModel._forward_output_layer:
+                raise NotImplementedError('fused linear cross-entropy MTP loss cannot apply a model-specific '
+                                          'logits transform (_forward_output_layer override); disable '
+                                          'cross_entropy_loss_fusion or remove the override')
+            return model.output_layer(hidden_states, *args, **kwargs)
+        return model._forward_output_layer(hidden_states, *args, **kwargs), None
+
+    def __getattr__(self, name):
+        return getattr(self._model.output_layer, name)
+
+
+class GPTModel(McoreGPTModel):
+    config: ModelConfig
+    extra_forward_keys = []
+
+    def __init__(
+        self,
+        config: ModelConfig,
+        transformer_layer_spec: ModuleSpec,
+        pre_process: bool = True,
+        post_process: bool = True,
+        mtp_block_spec: Optional[ModuleSpec] = None,
+        vp_stage: Optional[int] = None,
+    ):
+        vocab_size = math.ceil(
+            config.padded_vocab_size / config.tensor_model_parallel_size) * config.tensor_model_parallel_size
+        self.hf_rope_scaling = config.rope_scaling
+        if config.multi_latent_attention:
+            config.rope_type = 'rope'  # use transformers implementation
+            # Set default value, the following content will not be used. (dummy)
+            config.mscale_all_dim = 0.
+            config.cache_mla_latents = False
+            config.rotary_scaling_factor = 40
+            self._init_mla_softmax_scale(config)
+        super().__init__(
+            config,
+            transformer_layer_spec,
+            vocab_size,
+            config.max_position_embeddings,
+            pre_process=pre_process,
+            post_process=post_process,
+            share_embeddings_and_output_weights=not config.untie_embeddings_and_output_weights,
+            position_embedding_type=config.position_embedding_type,
+            rotary_base=config.rotary_base,
+            mtp_block_spec=mtp_block_spec,
+            vp_stage=vp_stage,
+        )
+        if config.multi_latent_attention:
+            self.rotary_pos_emb = RotaryEmbedding(
+                kv_channels=config.qk_pos_emb_head_dim,
+                rotary_percent=1,
+                rotary_interleaved=config.rotary_interleaved,
+                rotary_base=config.rotary_base,
+                use_cpu_initialization=config.use_cpu_initialization,
+            )
+            # save memory
+            for i in range(len(self.decoder.layers)):
+                if hasattr(self.decoder.layers[i].self_attention, 'rotary_pos_emb'):
+                    del self.decoder.layers[i].self_attention.rotary_pos_emb
+        self._set_inv_freq()
+        if self.config.task_type == 'seq_cls' and self.post_process:
+            self.output_layer = OutputLayerLinear(
+                config.hidden_size,
+                self.config.num_labels,
+                config=config,
+                init_method=config.init_method,
+                bias=False,
+                skip_bias_add=False,
+                parallel_mode='duplicated',
+                skip_weight_param_allocation=False,
+            )
+        elif self.config.task_type == 'embedding' and self.post_process:
+            self.output_layer = None
+
+        if config.attention_scaling != 1 and config.apply_rope_fusion:
+            config.apply_rope_fusion = False
+            logger.warning(f'`apply_rope_fusion` does not support `attention_scaling`. '
+                           f'Setting `config.apply_rope_fusion`: {config.apply_rope_fusion}')
+
+    def _init_mla_softmax_scale(self, config):
+        if self.hf_rope_scaling and self.hf_rope_scaling['rope_type'] == 'yarn':
+            # softmax_scale
+            config.mscale = self.hf_rope_scaling['mscale']
+            config.mscale_all_dim = self.hf_rope_scaling['mscale_all_dim']
+            config.rotary_scaling_factor = self.hf_rope_scaling['factor']
+
+    def _preprocess(
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        decoder_input: torch.Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+    ):
+        """Preprocesses inputs for the transformer decoder.
+
+        Applies embeddings to input tokens, or uses `decoder_input` from a previous
+        pipeline stage. Also sets up rotary positional embeddings.
+        """
+        # If decoder_input is provided (not None), then input_ids and position_ids are ignored.
+        # Otherwise, apply embedding layer on input_ids and position_ids to get decoder_input.
+        in_inference_mode = inference_context is not None and not self.training
+
+        # Decoder embedding.
+        if decoder_input is not None:
+            pass
+        elif self.pre_process:
+            decoder_input = self.embedding(input_ids=input_ids, position_ids=position_ids)
+        else:
+            # intermediate stage of pipeline
+            # decoder will get hidden_states from encoder.input_tensor
+            decoder_input = None
+
+        if decoder_input is not None and self.training and torch.is_grad_enabled() and not decoder_input.requires_grad:
+            # fix LoRA incompatibility with gradient checkpointing
+            decoder_input = decoder_input.requires_grad_(True)
+
+        mtp_decoder_input = decoder_input
+        if self.config.is_multimodal and self.config.mtp_num_layers and decoder_input is None:
+            input_tensor = self.get_input_tensor()
+            input_tensor, mtp_decoder_input = input_tensor.chunk(2, dim=0)
+            # Pipeline communication carries a single tensor, so models whose backbone keeps
+            # multiple hidden streams pad the H-wide embedding to the n*H transport width.
+            # The padding is transport-only and must not enter the MTP projection.
+            if mtp_decoder_input.shape[-1] != self.config.hidden_size:
+                mtp_decoder_input = mtp_decoder_input[..., :self.config.hidden_size].contiguous()
+            self.set_input_tensor(input_tensor)
+
+        rotary_pos_emb, rotary_pos_cos, rotary_pos_sin = self._get_rotary_pos_emb(
+            decoder_input, position_ids, packed_seq_params=packed_seq_params)
+
+        if (in_inference_mode and ((self.config.enable_cuda_graph and self.config.cuda_graph_scope != 'full_iteration')
+                                   or self.config.flash_decode) and rotary_pos_cos is not None
+                and inference_context.is_static_batching()):
+            current_batch_size = input_ids.shape[0]
+            sequence_len_offset = torch.tensor(
+                [inference_context.sequence_len_offset] * current_batch_size,
+                dtype=torch.int32,
+                device=rotary_pos_cos.device,  # Co-locate this with the rotary tensors
+            )
+        else:
+            sequence_len_offset = None
+
+        # Wrap decoder_input to allow the decoder (TransformerBlock) to delete the
+        # reference held by this caller function, enabling early garbage collection for
+        # inference. Skip wrapping if decoder_input is logged after decoder completion.
+        if in_inference_mode and not has_config_logger_enabled(self.config):
+            decoder_input = WrappedTensor(decoder_input)
+
+        return decoder_input, mtp_decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset
+
+    def _set_inv_freq(self):
+        if getattr(self, 'rotary_pos_emb', None) is None:
+            return
+        new_inv_freq, self.config.attention_scaling = get_rope_inv_freq(self.config)
+        self.rotary_pos_emb.inv_freq = new_inv_freq.to(self.rotary_pos_emb.inv_freq.device)
+
+    def _get_rotary_pos_emb(self, decoder_input, position_ids, packed_seq_params, inference_context=None):
+        # Rotary positional embeddings (embedding is None for PP intermediate devices)
+        rotary_pos_emb = None
+        rotary_pos_cos = None
+        rotary_pos_sin = None
+        if self.position_embedding_type in {'rope', 'mrope'}:
+            if not self.training and self.config.flash_decode and inference_context:
+                assert (inference_context.is_static_batching()
+                        ), 'GPTModel currently only supports static inference batching.'
+                # Flash decoding uses precomputed cos and sin for RoPE
+                max_sequence_length = inference_context.max_sequence_length
+                if max_sequence_length not in self.rotary_pos_emb_cache:
+                    self.rotary_pos_emb_cache[max_sequence_length] = self.rotary_pos_emb.get_cos_sin(
+                        max_sequence_length)
+                rotary_pos_cos, rotary_pos_sin = self.rotary_pos_emb_cache[max_sequence_length]
+            else:
+                rotary_seq_len = RotaryEmbedding.get_rotary_seq_len(self, inference_context, self.decoder,
+                                                                    decoder_input, self.config, packed_seq_params)
+                if self.hf_rope_scaling is not None:
+                    attention_scaling = dynamic_rope_update(self, self.rotary_pos_emb.inv_freq, rotary_seq_len)
+                    if attention_scaling is not None and attention_scaling != self.config.attention_scaling:
+                        raise ValueError('Currently does not support changing attention_scaling during training. '
+                                         f'config.attention_scaling: {self.config.attention_scaling}, '
+                                         f'current_attention_scaling: {attention_scaling}.')
+                if self.position_embedding_type == 'mrope':
+                    rotary_pos_emb = self.rotary_pos_emb(
+                        position_ids,
+                        mrope_section=self.mrope_section,
+                        mrope_interleaved=self.config.mrope_interleaved,
+                    )
+                else:
+                    packed_seq = packed_seq_params is not None and packed_seq_params.qkv_format == 'thd'
+                    rotary_pos_emb = self.rotary_pos_emb(
+                        rotary_seq_len,
+                        packed_seq=packed_seq,
+                    )
+        return rotary_pos_emb, rotary_pos_cos, rotary_pos_sin
+
+    # Code borrowed from NVIDIA/Megatron-LM
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        attention_mask: torch.Tensor = None,
+        decoder_input: torch.Tensor = None,
+        labels: torch.Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+        extra_block_kwargs: dict = None,
+        runtime_gather_output: Optional[bool] = None,
+        *,
+        inference_params: Optional[BaseInferenceContext] = None,
+        loss_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward function of the GPT Model This function passes the input tensors
+        through the embedding layer, and then the decoeder and finally into the post
+        processing layer (optional).
+
+        It either returns the Loss values if labels are given  or the final hidden units
+
+        Args:
+            runtime_gather_output (bool): Gather output at runtime. Default None means
+                `parallel_output` arg in the constructor will be used.
+        """
+        if self.config.position_embedding_type == 'mrope' and position_ids.ndim == 2:  # qwen3_asr
+            position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+        inference_context = deprecate_inference_params(inference_context, inference_params)
+
+        # There is a difference in whether rotary_pos_emb can be fused between the decoder and MTP.
+        decoder_input, mtp_decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset = (
+            self._preprocess(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                decoder_input=decoder_input,
+                inference_context=inference_context,
+                packed_seq_params=packed_seq_params,
+            ))
+        decoder_rotary_pos_emb = rotary_pos_emb
+        packed_seq = packed_seq_params is not None and packed_seq_params.qkv_format == 'thd'
+        if self.position_embedding_type == 'rope' and packed_seq and not self.config.apply_rope_fusion:
+            assert position_ids.shape[0] == 1, f'position_ids.shape: {position_ids.shape}'
+            if isinstance(rotary_pos_emb, dict):
+                for k, v in rotary_pos_emb.items():
+                    decoder_rotary_pos_emb[k] = v[position_ids[0]]
+            else:
+                decoder_rotary_pos_emb = rotary_pos_emb[position_ids[0]]
+
+        extra_block_kwargs = extra_block_kwargs or {}
+        full_attention_mask = attention_mask
+        if isinstance(full_attention_mask, dict):
+            full_attention_mask = full_attention_mask['full_attention']
+        if mcore_ge_016 and full_attention_mask is not None:
+            assert packed_seq_params is None
+            padding_mask = full_attention_mask.all(dim=(1, 2))
+            if self.config.context_parallel_size > 1:
+                padding_mask = split_cp_inputs(padding_mask, None, 1)
+            tp_size = self.config.tensor_model_parallel_size
+            if self.config.sequence_parallel and tp_size > 1:
+                assert padding_mask.shape[1] % tp_size == 0, f'padding_mask.shape: {padding_mask.shape}'
+                padding_mask = torch.chunk(padding_mask, tp_size, dim=1)[mpu.get_tensor_model_parallel_rank()]
+            extra_block_kwargs['padding_mask'] = padding_mask.contiguous()
+
+        if self.config.moe_n_hash_layers > 0 or getattr(self.config, 'ple_layer_ids', None) \
+                or getattr(self.config, 'moe_router_enable_vl_bias', False):
+            extra_block_kwargs['input_ids'] = input_ids
+        if getattr(self.config, 'indexer_n_heads', None) is not None:
+            extra_block_kwargs['position_ids'] = position_ids
+
+        # Run decoder.
+        decoder_output = self.decoder(
+            hidden_states=decoder_input,
+            attention_mask=attention_mask,
+            inference_context=inference_context,
+            rotary_pos_emb=decoder_rotary_pos_emb,
+            rotary_pos_cos=rotary_pos_cos,
+            rotary_pos_sin=rotary_pos_sin,
+            packed_seq_params=packed_seq_params,
+            sequence_len_offset=sequence_len_offset,
+            **extra_block_kwargs,
+        )
+
+        # When mHC + MTP, the decoder returns (contracted, multi-stream).
+        # MTP needs multi-stream; lm_head needs contracted.
+        if isinstance(decoder_output, tuple):
+            hidden_states, extra_block_kwargs['mhc_multistream'] = decoder_output
+        else:
+            hidden_states = decoder_output
+
+        # MTP: https://github.com/NVIDIA/Megatron-LM/issues/1661
+        extra_block_kwargs.pop('input_ids', None)
+        # self.mtp below takes position_ids explicitly; leaving it here would
+        # collide with the explicit kwarg.
+        extra_block_kwargs.pop('position_ids', None)
+        return self._postprocess(
+            hidden_states=hidden_states,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            labels=labels,
+            rotary_pos_emb=rotary_pos_emb,
+            rotary_pos_cos=rotary_pos_cos,
+            rotary_pos_sin=rotary_pos_sin,
+            loss_mask=loss_mask,
+            decoder_input=mtp_decoder_input,
+            attention_mask=attention_mask,
+            inference_params=inference_params,
+            packed_seq_params=packed_seq_params,
+            sequence_len_offset=sequence_len_offset,
+            runtime_gather_output=runtime_gather_output,
+            extra_block_kwargs=extra_block_kwargs,
+            inference_context=inference_context,
+        )
+
+    def _forward_output_layer(self, hidden_states, *args, **kwargs):
+        return self.output_layer(hidden_states, *args, **kwargs)[0]
+
+    def _init_reranker_cache(self, weight):
+        """One-time initialization of generative reranker constants."""
+        positive_token = os.environ.get('GENERATIVE_RERANKER_POSITIVE_TOKEN', 'yes')
+        negative_token = os.environ.get('GENERATIVE_RERANKER_NEGATIVE_TOKEN', 'no')
+        positive_token_id = self.tokenizer.convert_tokens_to_ids(positive_token)
+        negative_token_id = self.tokenizer.convert_tokens_to_ids(negative_token)
+
+        token_ids = torch.tensor([positive_token_id, negative_token_id], dtype=torch.long, device=weight.device)
+        self._reranker_tp_size = parallel_state.get_tensor_model_parallel_world_size()
+
+        if self._reranker_tp_size > 1:
+            tp_rank = parallel_state.get_tensor_model_parallel_rank()
+            vocab_per_partition = weight.shape[0]
+            vocab_start = tp_rank * vocab_per_partition
+
+            # Compute local indices; clamp remote tokens to 0 (masked out later)
+            local_indices = token_ids - vocab_start
+            mask = ((local_indices >= 0) & (local_indices < vocab_per_partition)).unsqueeze(-1)
+            local_indices = local_indices.clamp(0, vocab_per_partition - 1)
+
+            self.register_buffer('_reranker_local_indices', local_indices, persistent=False)
+            self.register_buffer('_reranker_mask', mask, persistent=False)  # [2, 1]
+        else:
+            self.register_buffer('_reranker_token_ids', token_ids, persistent=False)
+
+    def _forward_generative_reranker(self, hidden_states, output_weight):
+        """Compute reranker score by only calculating logits for positive/negative tokens.
+
+        Instead of computing logits over the full vocabulary, this method selects only
+        the output weight rows for the two target tokens and performs a small matmul,
+        with proper gradient handling under Tensor Parallelism.
+
+        Returns:
+            Tensor of shape [s, b, 1]: positive_logit - negative_logit.
+        """
+        weight = output_weight if output_weight is not None else self.output_layer.weight
+
+        if not hasattr(self, '_reranker_tp_size'):
+            self._init_reranker_cache(weight)
+
+        if self._reranker_tp_size > 1:
+            if self.config.sequence_parallel:
+                # fwd: all-gather seq dim [s/tp, b, h] → [s, b, h]
+                # bwd: reduce-scatter [s, b, h] → [s/tp, b, h] (sums grad across TP ranks)
+                hidden_states_parallel = gather_from_sequence_parallel_region(hidden_states)
+            else:
+                # fwd: identity; bwd: all-reduce (sums grad across TP ranks)
+                hidden_states_parallel = copy_to_tensor_model_parallel_region(hidden_states)
+
+            # Select weight rows for target tokens; mask zeros out remote tokens.
+            # weight[indices] maintains autograd to weight; mask keeps hidden_states_parallel
+            # in the graph even when both tokens are remote (prevents backward deadlock).
+            selected_weight = weight[self._reranker_local_indices] * self._reranker_mask  # [2, h]
+            logits = F.linear(hidden_states_parallel, selected_weight)  # [s, b, 2]
+
+            # reduce_from_tensor_model_parallel_region: fwd=all_reduce, bwd=identity
+            logits = reduce_from_tensor_model_parallel_region(logits)
+        else:
+            logits = F.linear(hidden_states, weight[self._reranker_token_ids])  # [s, b, 2]
+
+        return (logits[..., 0] - logits[..., 1])[..., None]
+
+    def _postprocess(self,
+                     hidden_states,
+                     input_ids,
+                     position_ids,
+                     labels,
+                     rotary_pos_emb,
+                     rotary_pos_cos,
+                     rotary_pos_sin,
+                     loss_mask=None,
+                     decoder_input=None,
+                     attention_mask=None,
+                     inference_params=None,
+                     packed_seq_params=None,
+                     sequence_len_offset=None,
+                     runtime_gather_output=None,
+                     extra_block_kwargs=None,
+                     inference_context=None,
+                     **kwargs):
+        """Postprocesses decoder hidden states to generate logits or compute loss.
+
+        Applies Multi-Token Prediction if enabled, generates output logits through
+        the output layer, and computes language model loss when labels are provided.
+        """
+        if not self.post_process:
+            if self.config.is_multimodal and self.config.mtp_num_layers:
+                # Pipeline P2P sends one tensor. Hyper-connection backbones can expose n*H
+                # hidden states while the embedding retained for MTP is only H wide, so pad
+                # the embedding for transport and slice it back in _preprocess on the next stage.
+                hidden_width = hidden_states.shape[-1]
+                decoder_width = decoder_input.shape[-1]
+                assert decoder_width <= hidden_width, (
+                    f'MTP pipeline transport requires decoder width <= hidden width, got '
+                    f'{decoder_width} and {hidden_width}.')
+                if decoder_width != hidden_width:
+                    decoder_input = F.pad(decoder_input, (0, hidden_width - decoder_width))
+                return torch.concat([hidden_states, decoder_input], dim=0)
+            else:
+                return hidden_states
+        labels = labels if self.config.task_type == 'causal_lm' else None
+        in_inference_mode = inference_context is not None and not self.training
+        if in_inference_mode:
+            assert runtime_gather_output, 'Inference must always gather TP logits'
+
+        # logits and loss
+        output_weight = None
+        if self.share_embeddings_and_output_weights:
+            output_weight = self.shared_embedding_or_output_weight()
+
+        if self.mtp_process and labels is not None:
+            # Extract bridge-specific params from extra_block_kwargs before
+            # forwarding to the MTP block.
+            ebk = dict(extra_block_kwargs or {})
+            mhc_multistream = ebk.pop('mhc_multistream', None)
+            padding_mask = ebk.pop('padding_mask', None)
+
+            hidden_states = self.mtp(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+                inference_params=inference_params,
+                rotary_pos_emb=rotary_pos_emb,
+                rotary_pos_cos=rotary_pos_cos,
+                rotary_pos_sin=rotary_pos_sin,
+                packed_seq_params=packed_seq_params,
+                sequence_len_offset=sequence_len_offset,
+                embedding=self.embedding,
+                decoder_input=decoder_input if self.config.is_multimodal else None,
+                padding_mask=padding_mask,
+                mhc_multistream=mhc_multistream,
+                **ebk,
+            )
+
+            # Merge -100 labels into loss_mask so upstream process_mtp_loss
+            # sees a clean mask (bridge historically filtered inside its loop).
+            mtp_loss_mask = prepare_mtp_loss_mask(labels, loss_mask)
+
+            hidden_states = process_mtp_loss_compat(
+                hidden_states=hidden_states,
+                labels=labels,
+                loss_mask=mtp_loss_mask,
+                output_layer=_MtpOutputLayerProxy(self),
+                output_weight=output_weight,
+                runtime_gather_output=runtime_gather_output,
+                is_training=self.training,
+                compute_language_model_loss=self.compute_language_model_loss,
+                config=self.config,
+                cp_group=self.cp_group,
+                packed_seq_params=packed_seq_params,
+                # Forwarded only when the installed process_mtp_loss accepts
+                # them (0.19+/dev); dev requires tp_group to compute MTP
+                # acceptance counts from vocab-sharded logits under TP>1.
+                tp_group=self.pg_collection.tp,
+                input_ids=input_ids,
+            )
+        sequence_parallel_override = False
+        if in_inference_mode and inference_context.materialize_only_last_token_logits:
+            if inference_context.is_static_batching():
+                hidden_states = hidden_states[-1:, :, :]
+            else:
+                if self.output_layer.sequence_parallel:
+                    # Perform the sequence parallel gather here instead of after the output layer
+                    # because we need to slice the last token logits from the full view of the
+                    # packed logits across all requests.
+                    # TODO(ksanthanam): Make the equivalent change in the `MambaModel` code after
+                    # merging in !3722.
+                    hidden_states = gather_from_sequence_parallel_region(hidden_states, group=self.pg_collection.tp)
+                    self.output_layer.sequence_parallel = False
+                    sequence_parallel_override = True
+
+                # Reshape [B, 1, H] to [1, B, H] → extract each sample’s true last‐token hidden
+                # state ([B, H]) → unsqueeze back to [1, B, H]
+                # (so that the output layer, which expects S×B×H, receives only the final token)
+                hidden_states = inference_context.last_token_logits(hidden_states.squeeze(1).unsqueeze(0)).unsqueeze(1)
+
+        if self.config.task_type == 'embedding':
+            logits = F.normalize(hidden_states, p=2, dim=-1)
+        elif self.config.task_type == 'generative_reranker':
+            logits = self._forward_generative_reranker(hidden_states, output_weight)
+        else:
+            logits = self._forward_output_layer(
+                hidden_states, weight=output_weight, runtime_gather_output=runtime_gather_output)
+        if self.config.task_type in {'seq_cls', 'embedding'
+                                     } and self.config.sequence_parallel and self.config.tensor_model_parallel_size > 1:
+            logits = gather_from_sequence_parallel_region(logits, tensor_parallel_output_grad=False)
+
+        # Restore sequence parallel execution to the output layer if necessary.
+        if sequence_parallel_override:
+            assert (in_inference_mode and inference_context.is_dynamic_batching()
+                    and inference_context.materialize_only_last_token_logits)
+            self.output_layer.sequence_parallel = True
+
+        if has_config_logger_enabled(self.config):
+            payload = OrderedDict({
+                'input_ids': input_ids,
+                'position_ids': position_ids,
+                'attention_mask': attention_mask,
+                'decoder_input': decoder_input,
+                'logits': logits,
+            })
+            log_config_to_disk(self.config, payload, prefix='input_and_logits')
+
+        if labels is None:
+            # [s b h] => [b s h]
+            return logits.transpose(0, 1).contiguous()
+
+        loss = self.compute_language_model_loss(labels, logits)
+
+        return loss
+
+    def get_input_tensor(self):
+        return self.decoder.input_tensor
+
+    def sharded_state_dict(
+            self,
+            prefix: str = '',
+            sharded_offsets: tuple = (),
+            metadata: Optional[dict] = None,
+    ) -> ShardedStateDict:
+        """Override to support embedding-task models that have no output_layer.
+
+        ``LanguageModule.sharded_state_dict`` and ``McoreGPTModel.sharded_state_dict``
+        both assume an ``output_layer`` exists. For ``task_type == 'embedding'`` we set
+        ``self.output_layer = None``, so we bypass those output_layer-related branches
+        by calling the grandparent (``MegatronModule``) directly, while preserving the
+        MTP embedding tying behavior from ``LanguageModule``.
+        """
+        if getattr(self, 'output_layer', None) is not None:
+            return super().sharded_state_dict(prefix, sharded_offsets, metadata)
+
+        assert not sharded_offsets, 'Unexpected sharded offsets'
+        if mcore_ge_016:
+            from megatron.core.transformer.utils import ensure_metadata_has_dp_cp_group
+            metadata = ensure_metadata_has_dp_cp_group(metadata)
+            kwargs = {'tp_group': self.tp_group, 'dp_cp_group': metadata['dp_cp_group']}
+        else:
+            kwargs = {}
+        # Skip LanguageModule.sharded_state_dict to avoid KeyError on output_layer.weight.
+        sharded_state_dict = super(LanguageModule, self).sharded_state_dict(prefix, sharded_offsets, metadata)
+
+        # Preserve MTP embedding tying behavior from LanguageModule.
+        if getattr(self, 'mtp_process', False) and not self.pre_process:
+            first_stage_word_emb_key = f'{prefix}embedding.word_embeddings.weight'
+            emb_weight = self.embedding.word_embeddings.weight
+            tie_word_embeddings_state_dict(
+                sharded_state_dict,
+                emb_weight,
+                first_stage_word_emb_key,
+                **kwargs,
+            )
+        return sharded_state_dict

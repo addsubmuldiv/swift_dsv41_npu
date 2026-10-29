@@ -1,0 +1,72 @@
+# Copyright (c) 2026, Huawei Technologies Co., Ltd. All rights reserved.
+# See LICENSE for license information.
+
+"""
+{描述：移植来源 + 覆盖范围 + 裁剪说明}
+上游参考: {上游测试文件}
+"""
+
+# D-class guardrails:
+# - 参考值必须独立构造（fp64 CPU ref / 手算公式 / PyTorch native 对照），禁止循环论证
+# - 禁止恒真断言：同对象自比较、同模块 round-trip 自证、无 RNG 重 seed 自证、
+#   自己置位自己断言、stub（字面 pass）空测 —— 见 assertion-guide.md「恒真断言禁令」
+# - 每文件：L1.2/L1.3 数值断言占比 ≥50%，反向/扰动断言 ≥1 条，smoke ≤2 条
+# - 同构 case 重复 ≥3 次必须 parametrize 合并；禁止重复定义 utils.py 已有的 helper
+
+import pytest
+import torch
+from utils import npu_available, assert_close, dtype_tols, to_cpu, make_reference_and_test_tensors
+
+pytestmark = pytest.mark.skipif(not npu_available(), reason="NPU device is required")
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _device():
+    return torch.device("npu")
+
+def _seed():
+    torch.manual_seed(42)
+    torch.npu.manual_seed(42)
+
+def _randn(shape, dtype=torch.float32):
+    """NPU 随机数 kernel 不可靠，CPU 生成再 .to(npu)"""
+    return torch.randn(shape, dtype=dtype, device="cpu").to(device=_device())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# {测试类名}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class {测试类名}:
+    @staticmethod
+    def setup_method() -> None:
+        _seed()
+
+    def test_{方法名}_{场景}(self):
+        """{测试描述}"""
+        # 1. 构造 ref 和 test 张量
+        ref, test = make_reference_and_test_tensors(
+            ({张量形状}),
+            test_dtype={dtype},
+            test_device=_device(),
+        )
+
+        # 2. 调用被测方法
+        result = {目标调用}
+
+        # 3. L1.2 数值断言 + L1.1 结构断言
+        assert result.{结构检查}
+        assert_close(to_cpu(result), to_cpu({参考值}), **dtype_tols({dtype}))
+
+    def test_{方法名}_扰动输入改变输出(self):
+        """反向断言（每文件 ≥1 条）：扰动输入 → 输出必须变化。"""
+        x1 = torch.zeros(({张量形状}), dtype={dtype}, device="cpu").to("npu")
+        x2 = torch.ones(({张量形状}), dtype={dtype}, device="cpu").to("npu")
+        out1 = {目标调用}(x1).float().cpu()
+        out2 = {目标调用}(x2).float().cpu()
+        assert not torch.equal(out1, out2), "输入扰动后输出未变化，疑似恒真/恒值实现"
+
+    def test_{方法名}_非法输入报错(self):
+        """异常路径（L1.4）：match 必须含具体名称/数值，能抓住消息文案错误。"""
+        with pytest.raises({异常类型}, match=r"{具体消息片段，如类名和数值}"):
+            {非法调用}

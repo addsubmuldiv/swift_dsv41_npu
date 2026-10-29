@@ -1,0 +1,580 @@
+# ============================================================================
+# Megatron-LM patch for GLM-5.3-Flash (shipped with mcore-bridge)
+# ============================================================================
+# Upstream base / TESTED ON:
+#   NVIDIA/Megatron-LM dev @ a5aa637fa5dbe2b08af7b413e32306dbc086aa01
+#   (megatron-core 0.20.0+a5aa637fa, 2026-10-22)
+#
+# Rebasing history: originally generated against dev ee743d3ef, rebased onto the
+# base commit above on 2026-10-23 (7 files, 30 hunks).
+#
+# Install / verify (source checkout or wheel):
+#   pip install --no-cache-dir \
+#     "git+https://github.com/NVIDIA/Megatron-LM.git@a5aa637fa5dbe2b08af7b413e32306dbc086aa01"
+#   python -m mcore_bridge.tools.apply_megatron_patch --check   # verify only
+#   python -m mcore_bridge.tools.apply_megatron_patch           # apply
+#   python -m mcore_bridge.tools.apply_megatron_patch --root <megatron-src-root>
+#
+# Still required here (upstream PRs not merged yet):
+#   * #7054  KDA two-stage gates, kda_disable_fp8, KDALayerConfig / K layer symbol
+#   * #7521  mHC precision controls (mhc_keep_mappings_in_fp32, learned output contract)
+#   * GLM's parameter-free mHC output mean + KDA in_proj width derivation
+#
+# Dropped from this rebase because upstream a5aa637fa already carries them:
+#   * dsa.py: upstream now ships a more complete KPool/NoPE implementation
+#   * optimizer/{__init__,clip_grads,optimizer}.py: expert-TP shard dedup and
+#     fp32-master allreduce backport
+#   * tests/unit_tests/tensor_parallel/test_layers.py (test-only)
+# ============================================================================
+
+diff --git a/megatron/core/models/hybrid/hybrid_block.py b/megatron/core/models/hybrid/hybrid_block.py
+index f51a6180b..e94d3975f 100644
+--- a/megatron/core/models/hybrid/hybrid_block.py
++++ b/megatron/core/models/hybrid/hybrid_block.py
+@@ -420,14 +420,15 @@ class HybridStack(MegatronModule):
+         if self.config.enable_mhc_connections and self.post_process and not self.is_mtp_layer:
+             hc_mult = self.config.mhc_num_residual_streams
+             hc_dim = self.config.hidden_size * hc_mult
+-            self.hc_head_fn = mark_keep_in_fp32(nn.Parameter(torch.randn(hc_mult, hc_dim)))
+-            self.hc_head_base = mark_keep_in_fp32(nn.Parameter(torch.zeros(hc_mult)))
+-            self.hc_head_scale = mark_keep_in_fp32(nn.Parameter(torch.ones(1)))
+-            nn.init.xavier_uniform_(self.hc_head_fn)
+-            if self.config.sequence_parallel:
+-                setattr(self.hc_head_fn, 'sequence_parallel', True)
+-                setattr(self.hc_head_base, 'sequence_parallel', True)
+-                setattr(self.hc_head_scale, 'sequence_parallel', True)
++            if self.config.mhc_learned_output_contract:
++                self.hc_head_fn = mark_keep_in_fp32(nn.Parameter(torch.randn(hc_mult, hc_dim)))
++                self.hc_head_base = mark_keep_in_fp32(nn.Parameter(torch.zeros(hc_mult)))
++                self.hc_head_scale = mark_keep_in_fp32(nn.Parameter(torch.ones(1)))
++                nn.init.xavier_uniform_(self.hc_head_fn)
++                if self.config.sequence_parallel:
++                    setattr(self.hc_head_fn, 'sequence_parallel', True)
++                    setattr(self.hc_head_base, 'sequence_parallel', True)
++                    setattr(self.hc_head_scale, 'sequence_parallel', True)
+ 
+         self._execution_layer_indices = list(range(len(self.layers)))
+         if self.config.moe_shortcut_connection:
+@@ -937,14 +938,20 @@ class HybridStack(MegatronModule):
+         if self.config.enable_mhc_connections and self.post_process and not self.is_mtp_layer:
+             if (self.config.mtp_num_layers or 0) > 0:
+                 mhc_multistream = hidden_states
+-            hidden_states = learned_output_contract(
+-                hidden_states,
+-                self.hc_head_fn,
+-                self.hc_head_base,
+-                self.hc_head_scale,
+-                self.config.mhc_num_residual_streams,
+-                self.config.layernorm_epsilon,
+-            )
++            if self.config.mhc_learned_output_contract:
++                hidden_states = learned_output_contract(
++                    hidden_states,
++                    self.hc_head_fn,
++                    self.hc_head_base,
++                    self.hc_head_scale,
++                    self.config.mhc_num_residual_streams,
++                    self.config.layernorm_epsilon,
++                )
++            else:
++                # GLM's output is a parameter-free mean over the streams (Megatron-LM #7054 / be805e55).
++                hidden_states = hidden_states.unflatten(
++                    -1, (self.config.mhc_num_residual_streams, self.config.hidden_size)
++                ).mean(dim=-2)
+ 
+         # Final layer norm.
+         if self.post_process and self.post_layer_norm:
+diff --git a/megatron/core/ssm/gated_delta_net/common.py b/megatron/core/ssm/gated_delta_net/common.py
+index e9285453d..973573f42 100644
+--- a/megatron/core/ssm/gated_delta_net/common.py
++++ b/megatron/core/ssm/gated_delta_net/common.py
+@@ -279,7 +279,9 @@ class _GDNBase(MegatronModule, TwoStageAttentionLayer):
+             ), f"Attribute {attr} for the GDN-family variant is not set"
+         # Full input projection width: q, k, v, output gate, and variant-specific gate features.
+         self.in_proj_qkvg_dim = self.qk_dim * 2 + self.v_dim * 2
+-        self.in_proj_dim = self.in_proj_qkvg_dim + self.in_proj_extra_dim
++        # Two-stage KDA gates are not in in_proj; derive the global width from the variant's
++        # declared chunks (equivalent to qkvg + extra when no two-stage gate is used).
++        self.in_proj_dim = sum(self.in_proj_split_sections) * self.tp_size
+ 
+         if self.config.fp8:
+             fp8_align_size = get_fp8_align_size(self.config.fp8_recipe)
+diff --git a/megatron/core/ssm/gated_delta_net/kda.py b/megatron/core/ssm/gated_delta_net/kda.py
+index dfa49da69..6999ee38d 100644
+--- a/megatron/core/ssm/gated_delta_net/kda.py
++++ b/megatron/core/ssm/gated_delta_net/kda.py
+@@ -34,6 +34,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
+ from megatron.core.utils import deprecate_inference_params, nvtx_range_pop, nvtx_range_push
+ 
+ try:
++    from fla.modules.fused_norm_gate import rms_norm_gated
+     from fla.ops.kda import chunk_kda
+ 
+     # KDA also relies on the shared FLA convolution, normalization, and CP helpers.
+@@ -48,6 +49,11 @@ class KimiDeltaAttentionSubmodules(GatedDeltaNetSubmodules):
+     """Submodules used by Kimi Delta Attention."""
+ 
+     beta_proj: ModuleSpec | type = IdentityOp
++    # From Megatron-LM #7054 / be805e55, under this file's NVIDIA license.
++    f_a_proj: ModuleSpec | type = IdentityOp
++    f_b_proj: ModuleSpec | type = IdentityOp
++    g_a_proj: ModuleSpec | type = IdentityOp
++    g_b_proj: ModuleSpec | type = IdentityOp
+ 
+ 
+ class KimiDeltaAttention(_GDNBase):
+@@ -80,6 +86,7 @@ class KimiDeltaAttention(_GDNBase):
+                 "FLA KDA is not installed. Install flash-linear-attention with KDA support."
+             )
+ 
++        self.two_stage_gates = config.kda_two_stage_gates
+         super().__init__(
+             config=config,
+             submodules=submodules,
+@@ -119,7 +126,38 @@ class KimiDeltaAttention(_GDNBase):
+         mark_keep_in_fp32(self.A_log)
+ 
+         # Pass raw g to FLA and let the KDA kernel apply A_log and dt_bias.
+-        self.use_gate_in_kernel = True
++        self.use_gate_in_kernel = not self.two_stage_gates
++        if self.two_stage_gates:
++            # HF lists GLM's conv1d as a strict-FP32 parameter; it must not be rounded when wrapping in BF16.
++            self.conv1d.float()
++            mark_keep_in_fp32(self.conv1d.weight)
++            if self.conv1d.bias is not None:
++                mark_keep_in_fp32(self.conv1d.bias)
++            for prefix, head_dim, output_dim in (
++                ("f", self.key_head_dim, self.qk_dim),
++                ("g", self.value_head_dim, self.v_dim),
++            ):
++                a_name, b_name = f"{prefix}_a_proj", f"{prefix}_b_proj"
++                setattr(
++                    self, a_name,
++                    build_module(
++                        getattr(submodules, a_name), self.hidden_size, head_dim,
++                        config=self.config, init_method=self.config.init_method,
++                        bias=bias, skip_bias_add=False, skip_weight_param_allocation=False,
++                        parallel_mode="duplicated",
++                        name=f"{name}.{a_name}" if name is not None else None,
++                    ),
++                )
++                setattr(
++                    self, b_name,
++                    build_module(
++                        getattr(submodules, b_name), head_dim, output_dim,
++                        config=self.config, init_method=self.config.init_method,
++                        gather_output=False, bias=bias, skip_bias_add=False, is_expert=False,
++                        tp_comm_buffer_name=b_name, tp_group=self.pg_collection.tp,
++                        name=f"{name}.{b_name}" if name is not None else None,
++                    ),
++                )
+ 
+     def _setup_variant_attrs(self) -> None:
+         """Set KDA dimensions, projection checkpoint metadata, and kernel callable."""
+@@ -139,6 +177,10 @@ class KimiDeltaAttention(_GDNBase):
+             self.qk_dim_local_tp,
+             self.v_dim_local_tp,
+         )
++        if self.two_stage_gates:
++            self.in_proj_extra_dim = 0
++            self.in_proj_split_names = self.in_proj_split_names[:3]
++            self.in_proj_split_sections = self.in_proj_split_sections[:3]
+         self.dt_bias_dim = self.qk_dim_local_tp
+         self.a_log_dim = self.num_k_heads_local_tp
+         self.gate_params_dtype = torch.float32
+@@ -188,8 +230,17 @@ class KimiDeltaAttention(_GDNBase):
+ 
+         x_dtype = x.dtype
+         x = x.reshape(-1, self.value_head_dim)
+-        x = self.out_norm(x)
+         gate = gate.reshape(-1, self.value_head_dim)
++        if self.two_stage_gates:
++            # HF rounds only after the norm and the sigmoid gate are multiplied; two BF16 ops are not
++            # equivalent.
++            weight = self.out_norm.weight
++            if self.config.layernorm_zero_centered_gamma:
++                weight = weight + 1
++            return rms_norm_gated(
++                x, gate, weight, None, activation="sigmoid", eps=self.config.layernorm_epsilon
++            )
++        x = self.out_norm(x)
+         return apply_attention_output_gate(x, gate, 'elementwise', cast_mode='none').to(x_dtype)
+ 
+     def forward(
+@@ -416,6 +467,21 @@ class KimiDeltaAttention(_GDNBase):
+             packed_seq_params,
+         )
+ 
++        raw_g = gate = None
++        if self.two_stage_gates:
++            f_a, _ = self.f_a_proj(hidden_states)
++            raw_g, _ = self.f_b_proj(f_a)
++            g_a, _ = self.g_a_proj(hidden_states)
++            gate, _ = self.g_b_proj(g_a)
++            raw_g, _ = a2a_cp_to_hp(
++                raw_g, (self.qk_dim_local_tp,), cp_size_headwise, cp_group_headwise,
++                cu_seqlens_q, seq_len_post_headwise, packed_seq_params,
++            )
++            gate, _ = a2a_cp_to_hp(
++                gate, (self.v_dim_local_tp,), cp_size_headwise, cp_group_headwise,
++                cu_seqlens_q, seq_len_post_headwise, packed_seq_params,
++            )
++
+         if self.gdn_pre_gated_delta_rule_fusion:
+             raise NotImplementedError(
+                 "gdn_pre_gated_delta_rule_fusion is not implemented for KDA yet."
+@@ -443,16 +509,12 @@ class KimiDeltaAttention(_GDNBase):
+             cu_seqlens_q,
+             chunkwise_cp_context,
+             packed_seq_params=packed_seq_params,
++            raw_g=raw_g,
++            gate=gate,
+         )
+-        kernel_inputs = {
+-            "q": query,
+-            "k": key,
+-            "v": value,
+-            "g": raw_g,
+-            "beta": beta,
+-            "A_log": A_log,
+-            "dt_bias": dt_bias,
+-        }
++        kernel_inputs = {"q": query, "k": key, "v": value, "g": raw_g, "beta": beta}
++        if self.use_gate_in_kernel:
++            kernel_inputs.update(A_log=A_log, dt_bias=dt_bias)
+         nvtx_range_pop(suffix="pre_gated_delta_rule")
+ 
+         nvtx_range_push(suffix="gated_delta_rule")
+@@ -460,10 +522,11 @@ class KimiDeltaAttention(_GDNBase):
+             **kernel_inputs,
+             initial_state=None,
+             output_final_state=False,
+-            use_qk_l2norm_in_kernel=False,
++            use_qk_l2norm_in_kernel=self.two_stage_gates and self.use_qk_l2norm,
+             use_gate_in_kernel=self.use_gate_in_kernel,
+             safe_gate=self.config.kda_safe_gate,
+             lower_bound=self.config.kda_lower_bound,
++            state_v_first=self.two_stage_gates,
+             cu_seqlens=cu_seqlens_q,
+             cp_context=chunkwise_cp_context,
+         )
+@@ -547,12 +610,20 @@ class KimiDeltaAttention(_GDNBase):
+         cu_seqlens_q=None,
+         chunkwise_cp_context=None,
+         packed_seq_params=None,
++        *,
++        raw_g=None,
++        gate=None,
+     ):
+         """Prepare QKV, output gate, beta, and raw decay tensors before KDA."""
+ 
+         qkvfg = qkvfg.transpose(0, 1)
+         beta = beta.transpose(0, 1)
+-        qkv, raw_g, gate = torch.split(qkvfg, self._get_feat_dim_split(cp_size_headwise), dim=-1)
++        if self.two_stage_gates:
++            qkv = qkvfg
++            raw_g = raw_g.transpose(0, 1)
++            gate = gate.transpose(0, 1)
++        else:
++            qkv, raw_g, gate = torch.split(qkvfg, self._get_feat_dim_split(cp_size_headwise), dim=-1)
+         gate = gate.reshape(batch, seq_len, -1, self.value_head_dim)
+ 
+         nvtx_range_push(suffix="conv1d")
+@@ -632,6 +703,32 @@ class KimiDeltaAttention(_GDNBase):
+         A_log_local_cp = get_parameter_local_cp(self.A_log, dim=0, cp_group=cp_group_headwise)
+         dt_bias_local_cp = get_parameter_local_cp(self.dt_bias, dim=0, cp_group=cp_group_headwise)
+ 
++        if self.two_stage_gates:
++            query_key, value = torch.split(
++                qkv,
++                [2 * self.qk_dim_local_tp // cp_size_headwise,
++                 self.v_dim_local_tp // cp_size_headwise],
++                dim=-1,
++            )
++            query_key = query_key.reshape(batch, seq_len, -1, self.key_head_dim)
++            value = value.reshape(batch, seq_len, -1, self.value_head_dim)
++            query, key = query_key.chunk(2, dim=2)
++            repeat_factor = self.num_value_heads // self.num_key_heads
++            if repeat_factor > 1:
++                query = query.repeat_interleave(repeat_factor, dim=2)
++                key = key.repeat_interleave(repeat_factor, dim=2)
++            num_key_heads = A_log_local_cp.numel()
++            raw_g = raw_g.reshape(batch, seq_len, num_key_heads, self.key_head_dim)
++            beta = beta.reshape(batch, seq_len, num_key_heads).float().sigmoid()
++            from fla.ops.kda.gate import fused_kda_gate
++
++            raw_g = fused_kda_gate(
++                raw_g, A_log_local_cp.contiguous(), dt_bias=dt_bias_local_cp.contiguous(),
++                lower_bound=self.config.kda_lower_bound if self.config.kda_safe_gate else None,
++            )
++            return (query.contiguous(), key.contiguous(), value.contiguous(), gate,
++                    beta.contiguous(), raw_g.contiguous(), A_log_local_cp, dt_bias_local_cp)
++
+         nvtx_range_push(suffix="prepare_input_for_gated_delta_rule")
+         kernel_inputs = self._prepare_input_for_gated_delta_rule(
+             qkv,
+@@ -687,3 +784,8 @@ class KimiDeltaAttention(_GDNBase):
+ 
+         super().backward_dw()
+         self.beta_proj.backward_dw()
++        if self.two_stage_gates:
++            self.f_a_proj.backward_dw()
++            self.f_b_proj.backward_dw()
++            self.g_a_proj.backward_dw()
++            self.g_b_proj.backward_dw()
+diff --git a/megatron/core/tensor_parallel/layers.py b/megatron/core/tensor_parallel/layers.py
+index 073857ae7..9b1c945db 100644
+--- a/megatron/core/tensor_parallel/layers.py
++++ b/megatron/core/tensor_parallel/layers.py
+@@ -235,6 +235,14 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
+ 
+     for attribute in _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS:
+         maybe_copy(attribute)
++    # `allreduce` is deliberately not in the defaults above (giving it a default would tag every
++    # parameter), but copies must still carry it: `allreduce=False` is what marks expert
++    # parameters as reduced over expert DP, and param_is_not_tensor_parallel_duplicate needs it
++    # to switch duplicate filtering to the expert TP group. Without this the fp32 master params
++    # built by the float16/distributed optimizers lose the mark, expert shards get deduplicated
++    # over the attention TP group instead, and -- since the expert grad-stats group does not span
++    # attention TP -- each rank ends up clipping with a different coefficient.
++    maybe_copy("allreduce")
+ 
+ 
+ def _initialize_affine_weight_gpu(weight, init_method, partition_dim, stride=1, is_expert=False):
+diff --git a/megatron/core/transformer/experimental_attention_variant/absorbed_mla.py b/megatron/core/transformer/experimental_attention_variant/absorbed_mla.py
+index 28d93bd0c..27c7c9866 100644
+--- a/megatron/core/transformer/experimental_attention_variant/absorbed_mla.py
++++ b/megatron/core/transformer/experimental_attention_variant/absorbed_mla.py
+@@ -205,7 +205,8 @@ class AbsorbedMLASelfAttention(Attention):
+         self.cache_mla_latents = self.config.cache_mla_latents
+         assert not self.cache_mla_latents, "cache_mla_latents is not supported for AbsorbedMLA"
+ 
+-        # NoPE has no positional slice to embed or rotate.
++        # NoPE has no positional slice to embed or rotate. (NoPE support: Megatron-LM #7054 /
++        # be805e55; dev's RoPE path is kept.)
+         self.use_rope = self.config.qk_pos_emb_head_dim > 0
+         if not self.use_rope:
+             self.rotary_pos_emb = None
+@@ -524,32 +525,31 @@ class AbsorbedMLASelfAttention(Attention):
+         # =========================================
+         # Prepare RoPE and seqlen related params
+         # =========================================
++        rotary_seq_len = None
++        if self.use_rope:
++            rotary_seq_len = self.rotary_pos_emb.get_rotary_seq_len(
++                inference_context, None, hidden_states, self.config, packed_seq_params
++            )
++
+         mscale = 1.0
+         rotary_pos_cos = None
+         rotary_pos_sin = None
+         thd_packed_seq = packed_seq_params is not None and packed_seq_params.qkv_format == 'thd'
+         use_fused_rope = self.use_rope and should_use_fused_mla_rope(self.config)
+-        if self.use_rope:
+-            rotary_seq_len = self.rotary_pos_emb.get_rotary_seq_len(
+-                inference_context, None, hidden_states, self.config, packed_seq_params
++        if not self.use_rope:
++            # NoPE: no rotary embedding; q_absorbed/kv_compressed carry no pos slice.
++            rotary_pos_emb = None
++        elif use_fused_rope:
++            rotary_pos_cos, rotary_pos_sin = self.rotary_pos_emb.get_cached_cos_sin(
++                rotary_seq_len, dtype=hidden_states.dtype, packed_seq=thd_packed_seq
+             )
+-            if use_fused_rope:
+-                rotary_pos_cos, rotary_pos_sin = self.rotary_pos_emb.get_cached_cos_sin(
+-                    rotary_seq_len, dtype=hidden_states.dtype, packed_seq=thd_packed_seq
+-                )
+-                rotary_pos_emb = None
+-                assert inference_context is None, "Inference with MLA RoPE fusion is not supported"
+-                assert (
+-                    fused_mla_rope_concat is not None
+-                ), "Fused MLA RoPE apply is not imported successfully"
+-            elif self.config.rope_type == "rope":
+-                rotary_pos_emb = self.rotary_pos_emb(rotary_seq_len, packed_seq=thd_packed_seq)
+-            else:
+-                rotary_pos_emb, mscale = self.rotary_pos_emb(
+-                    rotary_seq_len, packed_seq=thd_packed_seq
+-                )
++            rotary_pos_emb = None
++            assert inference_context is None, "Inference with MLA RoPE fusion is not supported"
++            assert fused_mla_rope_concat is not None, "Fused MLA RoPE apply is not imported successfully"
++        elif self.config.rope_type == "rope":
++            rotary_pos_emb = self.rotary_pos_emb(rotary_seq_len, packed_seq=thd_packed_seq)
+         else:
+-            # NoPE: no rotary embedding; q_absorbed/kv_compressed carry no pos slice.
++            rotary_pos_emb, mscale = self.rotary_pos_emb(rotary_seq_len, packed_seq=thd_packed_seq)
+             rotary_pos_emb = None
+ 
+         if thd_packed_seq:
+@@ -678,17 +678,16 @@ class AbsorbedMLASelfAttention(Attention):
+             k_up_weight, _ = self._get_kv_up_weights()
+ 
+             if not self.use_rope:
+-                q_absorbed = torch.einsum("...nd,ndk->...nk", q, k_up_weight)
+-                q_absorbed = q_absorbed.contiguous()
++                q_absorbed = torch.einsum("...nd,ndk->...nk", q, k_up_weight).contiguous()
+                 assert q_absorbed.size(-1) == self.config.kv_lora_rank
+                 assert q_absorbed.is_contiguous()
+                 assert kv_compressed.is_contiguous()
+-                # CheckpointWithoutOutput discards output storage; do not alias its saved input.
++                # Recomputation frees the output storage, so the output must not share storage with a
++                # saved input; CheckpointWithoutOutput discards output storage either way.
+                 return q_absorbed, kv_compressed.clone()
+ 
+             # [num_tokens, qk_pos_emb_head_dim] -> [num_tokens, 1, qk_pos_emb_head_dim]
+             k_pos_emb = torch.unsqueeze(k_pos_emb, -2)
+-
+             if use_fused_rope:
+                 # q_no_pe: [num_tokens, n, qk_head_dim]
+                 # q_pos_emb: [num_tokens, n, qk_pos_emb_head_dim]
+diff --git a/megatron/core/transformer/hyper_connection.py b/megatron/core/transformer/hyper_connection.py
+index c78a3adbb..b5f409d16 100644
+--- a/megatron/core/transformer/hyper_connection.py
++++ b/megatron/core/transformer/hyper_connection.py
+@@ -193,11 +193,30 @@ def native_h_post_bda(
+     return x_expanded + mixed
+ 
+ 
++@torch.compile
++def native_h_aggregate_fp32(x: Tensor, h_pre: Tensor) -> Tensor:
++    """GLM: round once after the FP32 mixing; the default aggregate operator is unchanged."""
++    return native_h_aggregate(x.float(), h_pre).to(x.dtype)
++
++
++@torch.compile
++def native_h_post_bda_fp32(h_res, original_residual, h_post, x, bias):
++    """GLM-only mixed-precision entry point; the graph of the original BF16 operator is unchanged."""
++    return native_h_post_bda(
++        h_res, original_residual.float(), h_post, x.float(),
++        None if bias is None else bias.float(),
++    ).to(original_residual.dtype)
++
++
+ # dynamic=True handles the hybrid mHC variable-shape path (was blanket-disabled)
+ @torch.compile
+-def native_proj_rms(x: Tensor, weight: Tensor, eps: float = 1e-6) -> Tuple[Tensor, Tensor]:
++def native_proj_rms(
++    x: Tensor, weight: Tensor, eps: float = 1e-6, eps_inside_sqrt: bool = False
++) -> Tuple[Tensor, Tensor]:
+     """Native fused projection + RMS normalization."""
+     proj = torch.matmul(x, weight.t())
++    if eps_inside_sqrt:
++        return proj, torch.rsqrt(x.square().mean(dim=-1, keepdim=True) + eps)
+     norm = x.norm(dim=-1, keepdim=True)
+     K = x.shape[-1]
+     v = norm / math.sqrt(K) + eps
+@@ -313,7 +332,7 @@ class HyperConnectionModule(MegatronModule):
+         mark_keep_in_fp32(self.alpha_post)
+         mark_keep_in_fp32(self.alpha_res)
+         mark_keep_in_fp32(self.bias)
+-        self.norm_eps = 1e-6
++        self.norm_eps = config.layernorm_epsilon if config.mhc_norm_eps_inside_sqrt else 1e-6
+ 
+         # Choose implementation: unified fused kernels vs reference modules.
+         # The fused public API selects the backend per operation internally.
+@@ -325,9 +344,12 @@ class HyperConnectionModule(MegatronModule):
+         # The fused path computes the projection and compute_h in one op, so
+         # _projection_and_get_norm — and therefore _proj_rms_op — is only ever
+         # reached on the unfused path.
+-        self._proj_rms_op = native_proj_rms
++        # From Megatron-LM #7054 / be805e55; the default precision convention of other models is unchanged.
++        self._proj_rms_op = partial(native_proj_rms, eps_inside_sqrt=config.mhc_norm_eps_inside_sqrt)
+ 
+         if config.use_fused_mhc:
++            if config.mhc_norm_eps_inside_sqrt or config.mhc_keep_mappings_in_fp32:
++                raise ValueError("Fused mHC does not support FP32 mixing or epsilon inside sqrt.")
+             from megatron.core.fusions.fused_mhc_kernels import (
+                 fused_h_aggregate,
+                 fused_h_aggregate_into,
+@@ -346,9 +368,9 @@ class HyperConnectionModule(MegatronModule):
+             self._proj_rms_compute_h_op = partial(fused_proj_rms_compute_h, backend=backend)
+         else:
+             self._sinkhorn_op = native_sinkhorn
+-            self._h_aggregate_op = native_h_aggregate
++            self._h_aggregate_op = native_h_aggregate_fp32 if config.mhc_keep_mappings_in_fp32 else native_h_aggregate
+             self._h_aggregate_into_op = native_h_aggregate_into
+-            self._h_post_bda_op = native_h_post_bda
++            self._h_post_bda_op = native_h_post_bda_fp32 if config.mhc_keep_mappings_in_fp32 else native_h_post_bda
+             self._proj_rms_compute_h_op = None
+ 
+         self._init_weights()
+@@ -470,7 +492,7 @@ class HyperConnectionModule(MegatronModule):
+         # The mixing weights are bounded (sigmoid outputs / doubly stochastic
+         # matrix), so after the FP32 computation they are safe to apply to the
+         # streams in the activation dtype.
+-        dtype = x.dtype
++        dtype = torch.float32 if self.config.mhc_keep_mappings_in_fp32 else x.dtype
+         return h_pre.to(dtype), h_post.to(dtype), h_res.to(dtype)
+ 
+     # dynamic=True handles the hybrid mHC variable-shape path (was blanket-disabled)
+@@ -594,7 +616,7 @@ class HyperConnectionModule(MegatronModule):
+         # Reshape for bmm: [s, b, n, n] -> [s*b, n, n]
+         h_res_batched = h_res.view(s * b, n, n)
+         # [s, b, n*C] -> [s, b, n, C] -> [s*b, n, C]
+-        residual_batched = residual.view(s, b, n, C).view(s * b, n, C)
++        residual_batched = residual.view(s * b, n, C).to(h_res.dtype)
+ 
+         # Batch matrix multiply: [s*b, n, n].T @ [s*b, n, C] -> [s*b, n, C]
+         mixed = torch.bmm(h_res_batched.transpose(1, 2), residual_batched)
+@@ -881,7 +903,7 @@ class HyperConnectionModule(MegatronModule):
+         bda_func = get_bias_dropout_add(training, fused)
+         with torch.cuda.nvtx.range("HyperConnection::bda"):
+             output = bda_func((x_expanded, bias_expanded), mixed, dropout_prob)
+-        return output
++        return output.to(original_residual.dtype) if self.config.mhc_keep_mappings_in_fp32 else output
+ 
+     @nvtx_decorator(message="HyperConnection::fused_h_res_h_post_bda_with_checkpoint")
+     def _fused_h_res_h_post_bda_with_checkpoint(
+@@ -956,7 +978,7 @@ class HyperConnectionModule(MegatronModule):
+                         bias_expanded = None
+                 with torch.cuda.nvtx.range("HyperConnection::bda"):
+                     output = bda_func((x_expanded, bias_expanded), mixed, dropout_prob)
+-                return output
++                return output.to(original_residual.dtype) if self.config.mhc_keep_mappings_in_fp32 else output
+ 
+             ckpt = CheckpointWithoutOutput(ckpt_manager=manager)
+             if has_bias:
+diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
+index cd49637f4..121fe7fe4 100644
+--- a/megatron/core/transformer/transformer_config.py
++++ b/megatron/core/transformer/transformer_config.py
+@@ -463,6 +463,12 @@ class TransformerConfig(ModelParallelConfig):
+     dsa_indexer_k_norm_fp32: bool = False
+     """Whether DSA indexer key LayerNorm should run on fp32 inputs."""
+ 
++    dsa_indexer_kpool: int = 1
++    """Tokens per index pool; 1 keeps the original per-token top-k."""
++
++    dsa_indexer_kpool_always_select_tail: bool = False
++    """Append the incomplete causal tail pool of every query."""
++
+     dsa_indexer_weights_proj_use_quantization: bool = True
+     """Whether ``DSAIndexer`` weights projection follows the enclosing FP8/FP4
+     quantization context. Disable this to keep the projection parameter outside FP8/FP4;
+@@ -597,6 +603,10 @@ class TransformerConfig(ModelParallelConfig):
+     linear_num_value_heads: Optional[int] = 32
+     """Number of value and gate heads for the gated delta net."""
+ 
++    # GLM numerical extensions, from Megatron-LM #7054 / be805e55 (NVIDIA license).
++    kda_two_stage_gates: bool = False
++    """Use separate low-rank forget and output gates; the input projection holds QKV only."""
++
+     kda_safe_gate: bool = False
+     """Whether the KDA kernel should use bounded gate values."""
+ 
+@@ -1558,6 +1568,15 @@ class TransformerConfig(ModelParallelConfig):
+     mhc_init_gating_factor: float = 0.01
+     """Initial value of Gating Factor (alpha in paper)."""
+ 
++    mhc_norm_eps_inside_sqrt: bool = False
++    """Compute the mHC norm as rsqrt(mean(x**2) + layernorm_epsilon)."""
++
++    mhc_keep_mappings_in_fp32: bool = False
++    """Keep mHC coefficients and the residual mixing in FP32, casting to the activation dtype at the end."""
++
++    mhc_learned_output_contract: bool = True
++    """When disabled, average the residual streams and build no learnable output-contraction parameter."""
++
+     use_fused_mhc: bool = False
+     """Use fused kernels for mHC operations when supported.
+ 

@@ -1,0 +1,130 @@
+name: transformer_engine.pytorch.ops
+api: pytorch
+api_type: function_fused_activation
+# Dual-route iteration: default = full-build generator
+# (generate_fused_activation.py, curated per-op matrix, golden-compatible;
+# ignores the sampling fields below except x's dtypes). The hook-route
+# candidate lives in generate_fused_activation_hook.py — to switch, change
+# this field to `generate_fused_activation_hook` AND pass
+# `-p .../generate_fused_activation_hook.py` to `atk case`. Once the hook
+# route is validated, generate_fused_activation.py gets deleted
+# (README "双轨迭代" / GENERALIZATION.md §5.3-§5.4).
+generate: generate_fused_activation_p0
+backward: false
+standard:
+  acc:
+    fused_activation_mare:
+      fp16_thd: 0.0009765625
+      bf16_thd: 0.0078125
+      fp32_thd: 0.0001220703125
+      mare_ratio: 10
+# The fields from here on are consumed by the HOOK route; the default
+# full-build route ignores them (its case list is the fixed curated matrix).
+# ---
+# Element-scale quotas: threshold sits in the pool-product low-density tail;
+# the ATK default (30% >=10M) is unreachable at this scale and burns the
+# full reshape-retry budget — or deadlocks via the cap-halving spiral.
+# See GENERALIZATION.md §5.3 for the design rules.
+shape_distributions:
+  - [1048576, 0.4]
+# Cases PER DTYPE (hook route = native semantics; full-build ignores —
+# its matrix is fixed). dtypes [bf16] x 10 keeps a comparable baseline;
+# raise it (e.g. 50) for sampling volume.
+dtype_numbers: 10
+# Boundary track switch: 0 keeps the default baseline off; tests may flip
+# to 'all'. CORRECTION (GPU-side generalization evidence): EMPTY inputs
+# are NPU-only legal — PyTorch's CUDA allocator hands out a null data_ptr
+# for 0-byte allocations, so every tex.* entry dies in NVTE's
+# CheckInputTensor ("Input ... is not allocated"); has_empty MUST stay
+# false (the hook guards this fail-closed). 0-dim x is legal on both
+# backends for the plain unary ops; scaled_srelu's NVTE backward asserts
+# on 0-dim (scale.unsqueeze(-1) broadcasts the output to [1] != cached
+# input []) and gated is kernel-limited, so the hook reconciles
+# 0-dim → [1] (scaled_srelu) / [2] (gated) — has_scalar MAY be enabled.
+# infnan stays off (no diff signal). With the flags below the track
+# yields only lower/upper value-border cases.
+extra_numbers: 0
+inputs:
+  # x — really sampled on the hook route. The NPU API accepts ANY ndim
+  # (elementwise semantics); empty inputs are NPU-only legal (NVTE
+  # rejects them — see the boundary note above), so has_empty stays
+  # false. The [2,3,4] pool below is a sample choice matching real
+  # activation layouts, not an API limit. Gated ops additionally
+  # require >= 1 dim and an even last dim — the hook reconciles both
+  # (odd → +1; 0-dim → [2] gated / [1] scaled_srelu) so the pool may
+  # carry odd values (17/24/48 exercise the reconcile).
+  # Determinism: same yaml + `atk case -s 1234` (CLI default seed) + same
+  # ATK version ⇒ identical cases.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [2, 3, 4]
+      dim_values:
+        values: [16, 17, 24, 32, 48, 64, 96, 128, 256, 512, 1024, 2048]
+      max_length: 2097152
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # dy — grad_output seed; range live; shape/dtype patched to the OP
+  # OUTPUT shape in after_case_config (gated ops halve the last dim; the
+  # op_name dependency sits at slot 3). Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[-0.5, 0.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # scale — per-row scale for the scaled MoE variants; range live,
+  # shape/dtype patched to x.shape[:-1]. Dead input (placeholder ignored)
+  # for the six non-scaled ops. Raw sampling pinned minimal.
+  - type: tensor
+    dtypes:
+      values: [bf16]
+    ranges:
+      valid:
+        values: [[0.5, 1.5]]
+    shapes:
+      dim_numbers:
+        values: [1]
+      dim_values:
+        values: [16]
+      max_length: 65536
+    boundary:
+      has_empty: false
+      has_infnan: false
+      has_scalar: false
+  # op: one of gelu / silu / relu / geglu / reglu / swiglu / scaled_swiglu /
+  # scaled_srelu / scaled_clamped_qgeglu. String attrs must keep an
+  # explicit value set — ATK's numeric fallback range [-5, 5] does not
+  # match their semantics. Unknown values fail fast at generation.
+  - type: attr
+    dtypes:
+      values: [string]
+    ranges:
+      valid:
+        values:
+          - gelu
+          - silu
+          - relu
+          - geglu
+          - reglu
+          - swiglu
+          - scaled_swiglu
+          - scaled_srelu
+          - scaled_clamped_qgeglu

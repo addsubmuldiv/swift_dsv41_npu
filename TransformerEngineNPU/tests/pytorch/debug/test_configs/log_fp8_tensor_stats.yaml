@@ -1,0 +1,11 @@
+test_log_fp8_tensor_stats:
+  enabled: True
+  layers:
+    layer_name_regex_pattern: decoder\.1\.mlp\.fc1
+  transformer_engine:
+    LogFp8TensorStats:
+      enabled: True
+      tensors: [activation]
+      stats: [underflows%]
+      start_step: 0
+      end_step: 1

@@ -1,0 +1,31 @@
+{
+  "ms-swift": {
+    "upstream": "https://github.com/addsubmuldiv/ms-swift",
+    "commit": "a013ae639060ba3439a60dd7cb07ff9561d06be6",
+    "local_patches": []
+  },
+  "mcore-bridge": {
+    "upstream": "https://github.com/addsubmuldiv/mcore-bridge",
+    "commit": "e7cb294a24cf98ac16be85774646cc8f46f9f6c2",
+    "local_patches": []
+  },
+  "Megatron-LM": {
+    "upstream": "https://github.com/NVIDIA/Megatron-LM",
+    "commit": "5c6efbc278b708c046e5b558964cb021f6fd750b",
+    "local_patches": [
+      "patches/mcore-python311.patch"
+    ]
+  },
+  "MegatronAdaptor": {
+    "upstream": "https://gitcode.com/Ascend/MegatronAdaptor",
+    "commit": "c7e52b2c8482105e6ec7fcd8cdef364e7c7b22c5",
+    "local_patches": []
+  },
+  "TransformerEngineNPU": {
+    "upstream": "https://gitcode.com/Ascend/TransformerEngineNPU",
+    "commit": "93eca54f264510f31dd10b68cd8ae18ad9a96bbe",
+    "local_patches": [
+      "patches/tenpu-python311.patch"
+    ]
+  }
+}
