@@ -1,0 +1,84 @@
+{
+  "torch": "2.10.0+cu130",
+  "gpu": "NVIDIA H20-3e",
+  "cases": [
+    {
+      "name": "all_256_packed_bytes_torch.float32",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_dtype": "torch.float32",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 0
+    },
+    {
+      "name": "noncontiguous_torch.float32",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_dtype": "torch.float32",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 0
+    },
+    {
+      "name": "all_256_packed_bytes_torch.float8_e8m0fnu",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_dtype": "torch.float8_e8m0fnu",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 0
+    },
+    {
+      "name": "noncontiguous_torch.float8_e8m0fnu",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_dtype": "torch.float8_e8m0fnu",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 0
+    },
+    {
+      "name": "all_256_UE8M0_scale_encodings",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_dtype": "torch.float8_e8m0fnu",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 5
+    },
+    {
+      "name": "expert_2304x5120",
+      "shape": [
+        2304,
+        5120
+      ],
+      "scale_dtype": "torch.float8_e8m0fnu",
+      "fp32_exact": true,
+      "bf16_bridge_exact": true,
+      "nonfinite_count": 0
+    }
+  ],
+  "benchmarks": {
+    "old": {
+      "average_ms": 34.818407986313105,
+      "peak_extra_MiB": 194.25048828125
+    },
+    "new": {
+      "average_ms": 6.806183932349086,
+      "peak_extra_MiB": 183.00048828125
+    }
+  },
+  "pass": true,
+  "scope": "Six single-GPU loading tests; no full training rerun. Microbenchmark is a single expert matrix only."
+}

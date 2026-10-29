@@ -1,0 +1,83 @@
+{
+  "record_date": "2026-10-29",
+  "scope": "four-layer DeepSeek V4.1 Flash, EP6, BF16 LoRA, synthetic short data",
+  "paired_200": {
+    "python_gpu": "3.12.16",
+    "python_npu": "3.12.16",
+    "gpu": "NVIDIA H20-3e",
+    "npu": "Ascend910_9382",
+    "torch_gpu": "2.10.0+cu130",
+    "torch_npu_base": "2.10.0+cpu",
+    "torch_npu_plugin": "2.10.0.post7",
+    "torch_git_both": "449b1768410104d3ed79d3bcfe4ba1d65c7f22c0",
+    "transformers": "5.12.1",
+    "transformer_engine_gpu": "2.17.1 NVIDIA implementation",
+    "transformer_engine_npu": "2.17.1 TENPU implementation",
+    "mae_decimal": "0.00142918945",
+    "points": 200,
+    "excluded_steps": [],
+    "smoothing": false,
+    "maximum_absolute_error": "0.04609871",
+    "maximum_error_step": 1,
+    "first_step": {
+      "step": "1",
+      "gpu_loss": "13.27376461",
+      "npu_loss": "13.2276659",
+      "absolute_error": "0.046098710000000764"
+    },
+    "last_step": {
+      "step": "200",
+      "gpu_loss": "8.16e-06",
+      "npu_loss": "8.42e-06",
+      "absolute_error": "2.600000000000009e-07"
+    },
+    "common_cpu_checkpoint_dequantization": true,
+    "allow_tf32_gpu": false,
+    "allow_hf32_npu": false,
+    "float32_matmul_precision": "highest"
+  },
+  "device_dequant_200_regression": {
+    "npu_rerun_only": true,
+    "gpu_baseline_reused": true,
+    "npu_old_new_loss_exact_matches": 200,
+    "mae_decimal": "0",
+    "gpu_npu_mae_decimal": "0.00142918945"
+  },
+  "py311_validation": {
+    "steps": 5,
+    "versus_py312_npu_first_5_mae": "0",
+    "full_200_or_gpu_py311_pair_not_run": true
+  },
+  "alignment": {
+    "all_1744_initial_parameters_per_rank_equal": true,
+    "all_1102_trainable_parallel_metadata_per_rank_equal": true,
+    "expert_lora_parameters_per_rank": 1024,
+    "rank_count": 6,
+    "batch_steps_per_rank": 200,
+    "input_ids_labels_position_ids_equal": true,
+    "attention_mask_causal_semantics_equal": true,
+    "actual_input_shape": [
+      1,
+      24
+    ],
+    "unique_input_digests": 2,
+    "dataset_rows": 32,
+    "dataset_shuffle": false,
+    "train_dataloader_shuffle": true,
+    "seed": 42,
+    "data_seed": 42
+  },
+  "historical_drift": {
+    "old_mae": "0.1113927687",
+    "upstream_fix": "modelscope/mcore-bridge PR #231, commit 9c43ac4; already included in current vendored bridge",
+    "extra_fp32_expert_merge_hook_in_final_code": false
+  },
+  "limitations": [
+    "not bitwise GPU/NPU equality",
+    "not full-model precision validation",
+    "not multi-node validation",
+    "synthetic data repeats two QA pairs; late losses near zero lower full-run MAE",
+    "no new GPU 200-step training after device-dequant changes",
+    "no independent Python3.11 200-step GPU/NPU comparison"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "gpu_fp4_loading_check.json": "ced0b1dad268eba440670a1a2e0baebe2c7cf5062bd07acc7b410c5415ed7009",
+  "gpu_npu_loss_200.csv": "d17ffdb8cd172e64cf6be60b2f7529c0e4a9c8d0539df7aae9c79969ba888e58",
+  "gpu_npu_loss_200.png": "a605f9c06a38c36f5acc8384e027f5244ee763fef354e503cffe9ef8dae94b54",
+  "parity_summary.json": "fe84159924a06d62237f32263852e729a9433cbbf4a335e1e3f6852ee330faf0",
+  "py311_py312_loss_5.csv": "de5c6fbf801402e3d4b3417e13057b6eb3567e12898b2270b9190d40e9639be2",
+  "npu_cpu_vs_device_dequant_200.csv": "f49d7849206749efe0ec87180d8c6675cfbd2c19df76ae719c5869129da5ad1c"
+}
