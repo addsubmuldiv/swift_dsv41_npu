@@ -40,3 +40,12 @@ micro batch=1、global batch=64、最大长度128、训练10步，full/uniform �
 
 本机只做了 shell 语法与当前 Swift 参数静态检查；完整模型 Engram map 的生成也已验证。
 未启动四机完整模型训练，实际显存和通信以目标机器运行结果为准。
+
+## Engram PP 启动校验修复
+
+最初的四机运行在 Engram 启动校验处报 `requires PP=1 without VPP`。
+当前已在 V4.1 bridge 适配层补上 PP 处理：Swift 为各 PP 阶段保留输入 token，
+HybridModel 将其传给 Engram 和重计算路径，层位置使用全局 Hybrid 编号。
+通用 MCore 的 PP 限制及 TP/SP/ETP 等其他校验保持原样。
+10 项 CPU 校验/依赖测试通过，覆盖真实 Engram PP4 启动校验、重计算及中间 PP 阶段的 token 保留；
+这不代表完整四机训练已经验证。补丁位于 `patches/bridge-engram-pp.patch`，已应用，无需手动打补丁。

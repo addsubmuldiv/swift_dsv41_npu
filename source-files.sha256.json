@@ -1699,7 +1699,7 @@
   "mcore-bridge/src/mcore_bridge/model/mm_gpts/utils.py": "7dd75b9da9601d8ebda825e8b27af80e889bde08a02a39c021d28edc644950a0",
   "mcore-bridge/src/mcore_bridge/model/mm_gpts/llava.py": "a2ee1c67ac750ef0208f82d65753bc3ee1c879dabaa192f461e1d5579cd6f7ed",
   "mcore-bridge/src/mcore_bridge/model/modules/absorbed_mla.py": "0df633868304e55cf188d4a53de1174bfd81c15a549ecd21e63adb2f57908a22",
-  "mcore-bridge/src/mcore_bridge/model/modules/engram.py": "e792f6f50c5746fbcbfe08c9377b47b8ee42fd1a2b057841ebfa2bca246d4089",
+  "mcore-bridge/src/mcore_bridge/model/modules/engram.py": "f5f6f5fa4621319ab365951807f6b96cfc31d24da9e39d118cbd7f1a77fe26fa",
   "mcore-bridge/src/mcore_bridge/model/modules/transformer_layer.py": "2a5aa026291c46da9ba81df3ded1cb27656803e8f2f39a07339753d6e6aa057e",
   "mcore-bridge/src/mcore_bridge/model/modules/ple.py": "4d6f7e33760f9f05ab5925571ea75c49e94b67fa5da4069dcbf9b7147b6eff63",
   "mcore-bridge/src/mcore_bridge/model/modules/__init__.py": "7a779a1c9055ff327f9ce6cc507a992ec8dd01c9e82bc7998f3ac23cf95aaab3",

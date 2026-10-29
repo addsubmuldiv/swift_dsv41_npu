@@ -8,7 +8,8 @@
     "upstream": "https://github.com/addsubmuldiv/mcore-bridge",
     "commit": "e7cb294a24cf98ac16be85774646cc8f46f9f6c2",
     "local_patches": [
-      "patches/bridge-optional-triton.patch"
+      "patches/bridge-optional-triton.patch",
+      "patches/bridge-engram-pp.patch"
     ]
   },
   "Megatron-LM": {

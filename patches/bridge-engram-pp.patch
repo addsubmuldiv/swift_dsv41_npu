@@ -1,0 +1,42 @@
+diff --git a/src/mcore_bridge/model/modules/engram.py b/src/mcore_bridge/model/modules/engram.py
+index 843a27d..a2c719b 100644
+--- a/src/mcore_bridge/model/modules/engram.py
++++ b/src/mcore_bridge/model/modules/engram.py
+@@ -38,20 +38,15 @@ def has_native_engram() -> bool:
+ 
+ 
+ class _RelaxedParallelismView:
+-    """Read-only view of a transformer config that hides the CP and VPP guards.
+-
+-    Lets the Engram validators reuse every upstream parallelism check except the two
+-    DeepSeek-V4.1 has shown safe to drop, without mutating the shared transformer config:
+-
+-    * ``context_parallel_size``: V4.1 hashes the full sequence locally and then slices its own
+-      CP interval, so no n-gram window ever crosses a CP rank boundary.
+-    * ``virtual_pipeline_model_parallel_size``: ``Engram.forward`` is self-contained (it never
+-      exchanges state across pipeline/VP stages), and its layer placement keys off the
+-      vp_stage-aware global ``layer_number`` that ``select_pipeline_segment`` assigns to each
+-      chunk. The hybrid stack's ``__init__`` block-alignment guard rejects any partial-block
+-      stage at build time, so an Engram-carrying ``D`` layer can never be split across stages.
++    """Defer CP/PP/VPP validation to the V4.1 hybrid integration.
++
++    Swift keeps token IDs on every PP stage, and HybridModel forwards them to Engram,
++    including full recomputation. Placement uses global hybrid layer numbers; the
++    hybrid stack rejects partial-block pipeline boundaries. CP hashes the full token
++    sequence before slicing the local interval.
+     """
+ 
++    pipeline_model_parallel_size = 1
+     context_parallel_size = 1
+     virtual_pipeline_model_parallel_size = None
+ 
+@@ -116,8 +111,7 @@ if EngramConfig is not None:
+                 self.layer_ids = placement_layer_ids
+ 
+         def _validate_parallelism(self, transformer_config, sequence_length=None):
+-            # Drop only the upstream CP and VPP rejections (see _RelaxedParallelismView for why
+-            # both are safe on the V4.1 hybrid path) and keep every other check -- etp==tp, the
++            # Defer CP/PP/VPP checks to the hybrid path, keeping every other check -- etp==tp, the
+             # SP rank-local history length, etc. CP shortens the rank-local slice the SP check
+             # compares against, so apply it here before delegating.
+             context_parallel_size = transformer_config.context_parallel_size

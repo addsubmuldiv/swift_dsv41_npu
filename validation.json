@@ -171,6 +171,16 @@
       "rank0_ipv4_and_interface",
       "shared_address_and_port_for_ranks1_2_3",
       "manual_address_override"
-    ]
+    ],
+    "engram_pipeline_guard_followup": {
+      "reported_error": "Engram model integration currently requires PP=1 without VPP.",
+      "baseline_startup_pp4_error_reproduced": true,
+      "fix": "V4.1 adapter defers PP validation to the hybrid integration",
+      "validator_and_dependency_tests_passed": 10,
+      "middle_pipeline_stage_token_ids_cpu_test_passed": true,
+      "generic_engram_pp_guard_preserved": true,
+      "tp_sp_etp_guards_preserved": true,
+      "multi_node_training_tested": false
+    }
   }
 }
