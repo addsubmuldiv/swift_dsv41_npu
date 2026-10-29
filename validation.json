@@ -54,5 +54,51 @@
   "plain_clone_verified": true,
   "plain_clone_installation_exit_code": 0,
   "source_entries": 5900,
-  "uses_submodules": false
+  "uses_submodules": false,
+  "initial_validation_triton_ascend": "3.6.0",
+  "triton_ascend_3_2_2_followup": {
+    "installation_exit_code": 0,
+    "x86_triton": "3.2.0",
+    "triton_ascend": "3.2.2",
+    "pytest": "8.3.2",
+    "npu_checks": [
+      "TritonAscendJIT",
+      "Linear",
+      "LayerNormLinear",
+      "GroupedLinear"
+    ],
+    "six_npu_training_steps": 5,
+    "losses": [
+      {
+        "step": 1,
+        "loss": 13.2276659,
+        "grad_norm": 1.74964523
+      },
+      {
+        "step": 2,
+        "loss": 13.17769241,
+        "grad_norm": 1.84241819
+      },
+      {
+        "step": 3,
+        "loss": 13.31243324,
+        "grad_norm": 2.39051318
+      },
+      {
+        "step": 4,
+        "loss": 13.63906479,
+        "grad_norm": 3.90207195
+      },
+      {
+        "step": 5,
+        "loss": 12.5469141,
+        "grad_norm": 4.10004902
+      }
+    ],
+    "safetensors_saved": true,
+    "aarch64_cp311_wheel_downloaded": true,
+    "aarch64_dependency_resolution": "triton3.5.0 + triton-ascend3.2.2 + pytest8.3.2",
+    "aarch64_hardware_training_tested": false,
+    "new_200_step_comparison_run": false
+  }
 }

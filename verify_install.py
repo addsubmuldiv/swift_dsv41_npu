@@ -14,6 +14,8 @@ from mcore_bridge.model import get_mcore_model_type, get_model_meta
 from mcore_bridge.model.modules.engram import has_native_engram
 from swift.megatron.init import init_megatron_env
 
+from verify_triton import verify_triton
+
 root = Path(__file__).resolve().parent
 modules = {
     'Megatron-LM': megatron.core,
@@ -34,6 +36,7 @@ assert torch.npu.is_available(), 'Check CANN, driver and container device mounts
 x = torch.ones(4, 4, device='npu')
 assert torch.equal((x @ x).cpu(), torch.full((4, 4), 4.0, device='cpu'))
 print('PASS: NPU matmul and DeepSeek V4.1 initialization', flush=True)
+verify_triton()
 print('Python:', sys.version.split()[0])
 for name in ('torch', 'torch-npu', 'transformers', 'triton-ascend', 'transformer-engine'):
     print(name, importlib.metadata.distribution(name).version)

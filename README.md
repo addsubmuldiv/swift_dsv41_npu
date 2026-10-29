@@ -26,7 +26,9 @@ Python 3.12 也允许安装；本仓库的新安装与训练验证使用 3.11。
 
 脚本会安装锁定版本的 Python 依赖，再 editable 安装五个本地目录，最后执行依赖检查、
 源码加载路径检查、NPU 张量运算及 DeepSeek V4.1 注册/初始化检查。
-默认使用华为 PyPI 镜像，可用 `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 覆盖。
+当前固定 **Triton-Ascend 3.2.2**：x86_64 配社区 Triton 3.2.0，aarch64 配 3.5.0，pytest 配 8.3.2。
+脚本会显式从 Ascend 源预取匹配 Python/架构的 wheel，再解析依赖，并最后恢复 Ascend 的共享文件覆盖层。
+`PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 控制常规包索引；Ascend wheel 源可用 `ASCEND_PIP_INDEX_URL` 覆盖。
 如果容器里有内部标签不兼容的可选旧 decord wheel，脚本会移除它；本次只验证语言训练。
 
 ## 单机减层训练验证

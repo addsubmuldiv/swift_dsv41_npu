@@ -32,7 +32,8 @@
 | TorchNPU | 2.10.0.post7 | 必须使用与 Python ABI 对应的 wheel |
 | Transformers | 5.12.1 | 保持与模型及精度实验一致 |
 | TENPU | 2.17.1 | 使用下表固定提交，而非任意同版本源码 |
-| Triton / Triton-Ascend | 3.6.0 / 3.6.0 | py311 JIT kernel 已实际编译执行 |
+| Triton / Triton-Ascend（当前安装） | x86_64：3.2.0 / 3.2.2；aarch64：3.5.0 / 3.2.2 | 按各架构官方 wheel 元数据锁定；pytest=8.3.2 |
+| Triton / Triton-Ascend（原实验） | 3.6.0 / 3.6.0 | 原 200 步精度比较与最初 py311 验证使用；不是当前安装默认值 |
 | NumPy / PEFT | 1.26.4 / 0.20.0 | 与对比实验一致 |
 | torchvision / torchaudio | 0.25.0+cpu / 2.10.0+cpu | 测试基础环境中的配套版本 |
 | av / networkx | 18.1.0 / 3.6.1 | 为 py311 选择的兼容版本 |
@@ -105,7 +106,9 @@ source env.sh
 - 对内部标签不兼容的可选 decord 旧 wheel 做移除处理；不验证视频输入能力。
 
 源码已经固定并打好补丁，脚本不再 fetch、checkout 或现场 patch。
-默认 PyPI 镜像可通过 `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 覆盖。
+常规 PyPI 镜像可通过 `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 覆盖。
+Triton-Ascend 单独从 `ASCEND_PIP_INDEX_URL`（默认官方华为 Ascend 源）预取，避免容器已有的 extra-index 配置遗漏该源。
+解析全部依赖后，最后重装同一 Ascend wheel，避免社区 Triton 覆盖其共享目录。
 
 `env.sh` 根据自己的位置设置 `MEGATRON_LM_PATH`、源码搜索路径和 `NO_VCS_VERSION=1`，
 避免 MCore 把外层集成仓库的提交号误当作自身版本后缀。它会尝试常见 CANN 环境脚本路径，
@@ -248,7 +251,25 @@ Triton-Ascend JIT，以及 bridge 回归测试 **52 passed / 8 skipped**；跳�
 此前用于定位的“FP32 专家输出合并”hook 没有合入最终代码，也没有用于最终 main 版 200 步结论。
 它与加载阶段的 FP32 反量化是两件事，不能混为一个修复。
 
-### 5.6 通信和显存问题
+### 5.6 Triton 架构依赖与索引
+
+用户在 aarch64/Python3.11 上遇到 `triton-ascend` 无匹配发行版错误。
+官方源有对应 wheel，错误中“请求3.6.0”和“约束3.6.0”本身不是两个版本互相冲突；
+缺少匹配候选包、索引不可达或配置遗漏也会表现为 ResolutionImpossible。
+
+当前按部署要求改为 Triton-Ascend **3.2.2**，并核对两个架构 wheel 的实际 METADATA：
+
+| 架构 | 社区 Triton | pytest |
+| --- | --- | --- |
+| x86_64 | 3.2.0 | 8.3.2 |
+| aarch64 | 3.5.0 | 8.3.2 |
+
+因此不能只把 `triton-ascend==3.6.0` 替换成3.2.2而保留其它旧约束。
+这是按所选版本修正依赖，不是在没有实测依据的情况下评价3.6.0整体质量。
+此前文档中的200步精度结果保留为3.6.0环境的历史记录；没有用它认证3.2.2的200步精度。
+架构依赖测试位于 `tests/test_install_constraints.py`，wheel 元数据快照位于 `tests/fixtures/`。
+
+### 5.7 通信和显存问题
 
 历史实验出现过资源占用导致的 OOM、某设备组合在模型加载前的 HCCL/AICPU 初始化失败，
 以及一次首步日志归约时 HCCL 申请 420478976 字节失败（EL0019）。
@@ -270,6 +291,7 @@ Triton-Ascend JIT，以及 bridge 回归测试 **52 passed / 8 skipped**；跳�
 | Torch Git 提交 | `449b1768410104d3ed79d3bcfe4ba1d65c7f22c0` | 同左 |
 | TransformerEngine | NVIDIA 2.17.1 | TENPU 2.17.1，另一套实现 |
 | 共同依赖 | Transformers 5.12.1、PEFT 0.20.0、NumPy 1.26.4 | 同左 |
+| 历史精度实验 Triton | 社区3.6.0 | 社区3.6.0 + Triton-Ascend3.6.0 |
 | Swift | `a013ae639060ba3439a60dd7cb07ff9561d06be6` | 同左 |
 | 首次 main 复验 bridge | `53488620c227d9a929fb2ef75c5e7acc26ccdb27` + 共同加载兼容改动 | 同左 |
 | MCore 源码 | `5c6efbc278b708c046e5b558964cb021f6fd750b` | 同左，另加 Adaptor/TENPU |

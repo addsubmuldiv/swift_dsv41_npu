@@ -1,5 +1,7 @@
 # Local validation
 
+## Initial validation (Triton-Ascend 3.6.0)
+
 Validated on 2026-10-29 with the source snapshots and py311 patches in this repository.
 A separate Python 3.11 environment was used for this checkout.
 
@@ -24,3 +26,22 @@ A separate Python 3.11 environment was used for this checkout.
 This verifies installation and a reduced training path. It is not full-model, multi-node,
 or 200-step precision validation. No model weights or machine-specific logs are published.
 See `validation.json` for the structured summary.
+
+## Triton-Ascend 3.2.2 follow-up
+
+The installer now defaults to Triton-Ascend 3.2.2, not the 3.6.0 baseline above.
+Official cp311 wheel metadata requires community Triton 3.2.0 on x86_64,
+Triton 3.5.0 on aarch64, and pytest 8.3.2 on both.
+
+- x86_64 installation, pip check, source paths, NPU initialization: passed.
+- NPU Triton JIT compilation/execution and TENPU Linear/LayerNormLinear/GroupedLinear forward/backward: passed.
+- Six-NPU, four-layer, five-step LoRA training and checkpoint/safetensors saving: passed.
+- aarch64 cp311 Ascend wheel: downloaded and its actual metadata checked.
+- aarch64 Triton/Ascend dependency resolution: passed with the platform-specific constraints.
+- Two architecture-constraint regression tests: passed.
+- aarch64 hardware training was not run on this x86_64 host. No new 200-step precision comparison was run.
+
+The installer explicitly obtains the Ascend wheel from its dedicated index even
+when the container's `PIP_EXTRA_INDEX_URL` points elsewhere. It restores the Ascend
+shared-file overlay after community Triton installation, and verifies an NPU JIT kernel.
+Historical 3.6.0 precision results are not relabeled as 3.2.2 results.
