@@ -26,14 +26,6 @@ for name in ('torch', 'torch-npu', 'torchvision', 'torchaudio'):
     print(f'{name}=={version}')
 PY
 export PIP_CONSTRAINT="$work_dir/constraints.txt"
-export PIP_INDEX_URL=${PIP_INDEX_URL:-https://repo.huaweicloud.com/repository/pypi/simple}
-export PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-https://mirrors.huaweicloud.com/ascend/repos/pypi}
-# Fetch the architecture/Python-specific Ascend wheel before the full resolver run.
-# This source must be explicit even if the container has a different extra index.
-ASCEND_PIP_INDEX_URL=${ASCEND_PIP_INDEX_URL:-https://mirrors.huaweicloud.com/ascend/repos/pypi}
-"$PYTHON" -c 'import platform, sys; print("Triton-Ascend preflight:", platform.machine(), sys.version.split()[0])'
-PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip download --no-deps --only-binary=:all: \
-    --index-url "$ASCEND_PIP_INDEX_URL" --dest "$work_dir/wheels" 'triton-ascend==3.2.2'
 "$PYTHON" -m pip install 'setuptools>=80' wheel
 # Some old optional decord wheels advertise CPython 3.6-only internal tags.
 if "$PYTHON" - <<'PY'
@@ -53,11 +45,7 @@ then
     echo 'Removing incompatible optional decord wheel; video input is outside this validation.'
     "$PYTHON" -m pip uninstall -y decord
 fi
-"$PYTHON" -m pip install --find-links "$work_dir/wheels" -r "$ROOT/requirements.txt"
-# Community Triton and Triton-Ascend share files. Restore the Ascend overlay last;
-# its dependencies have already been resolved above, and pip check runs below.
-"$PYTHON" -m pip install --no-deps --force-reinstall --no-index \
-    --find-links "$work_dir/wheels" 'triton-ascend==3.2.2'
+"$PYTHON" -m pip install -r "$ROOT/requirements.txt"
 for repo in Megatron-LM MegatronAdaptor TransformerEngineNPU mcore-bridge ms-swift; do
     echo "Installing $repo from $ROOT/$repo"
     (cd "$ROOT/$repo" && "$PYTHON" -m pip install --no-build-isolation -e .)

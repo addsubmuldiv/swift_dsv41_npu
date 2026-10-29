@@ -71,11 +71,11 @@ setuptools.setup(
     install_requires=[
         "torch>=2.1.0",
         "torch-npu",
-        "triton-ascend",
         "einops",
         "packaging",
         "nvdlfw-inspect",
     ],
+    extras_require={"triton": ["triton-ascend==3.2.2"]},
     packages=setuptools.find_packages(),
     include_package_data=True,
     install_package_data=True,

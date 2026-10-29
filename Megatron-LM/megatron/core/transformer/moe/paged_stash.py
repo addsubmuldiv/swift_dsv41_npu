@@ -10,11 +10,6 @@ from megatron.core._rank_utils import log_single_rank
 from megatron.core.full_cuda_graph import FullCudaGraphWrapper
 from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
 from megatron.core.transformer.cuda_graph_config import is_whole_moe_cuda_graph_scope
-from megatron.core.transformer.moe.ops.paged_stash import (
-    GLOBAL_BLOCK_SIZE,
-    paged_stash_copy_kernel,
-    paged_stash_pop_kernel,
-)
 from megatron.core.utils import get_attr_wrapped_model
 
 logger = logging.getLogger(__name__)
@@ -193,6 +188,11 @@ class PagedTensor:
 
     def offload_to_stash(self, paged_stash_buffer: PagedStashBuffer, max_blocks=2048):
         """Offload the paged tensor to paged stash buffer (CUDA or host if CUDA full)."""
+        from megatron.core.transformer.moe.ops.paged_stash import (
+            GLOBAL_BLOCK_SIZE,
+            paged_stash_copy_kernel,
+        )
+
         # Zero uninitialized metadata before copy kernel (enqueued on current stream;
         # stash_paged_tensors runs offload on the pack stream).
         self.page_record.zero_()
@@ -250,6 +250,11 @@ class PagedTensor:
         ``_tensor`` must already be allocated on the main (default) stream by the caller;
         this method only enqueues unpack-stream kernels that fill it from the stash.
         """
+        from megatron.core.transformer.moe.ops.paged_stash import (
+            GLOBAL_BLOCK_SIZE,
+            paged_stash_pop_kernel,
+        )
+
         assert self._tensor is not None, "reload_from_stash expects _tensor pre-allocated on main"
         assert tuple(self._tensor.shape) == tuple(self.original_shape), (
             f"_tensor shape {tuple(self._tensor.shape)} != "

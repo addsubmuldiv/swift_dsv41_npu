@@ -9,7 +9,6 @@ import torch
 
 from ...constants import TensorUsage
 from ...quantized_tensor import QuantizedTensorStorage, transpose_mx_data
-from ...triton.mxfp8_dequantize import mxfp8_dequantize
 
 if TYPE_CHECKING:
     from ..mxfp8_tensor import MXFP8Quantizer
@@ -354,4 +353,6 @@ class MXFP8TensorStorage(QuantizedTensorStorage):
 
 def _dequantize_mxfp8_impl(tensor: MXFP8TensorStorage, dtype: torch.dtype) -> torch.Tensor:
     """Shared MXFP8 dequantize implementation for forward and autograd apply."""
+    from ...triton.mxfp8_dequantize import mxfp8_dequantize
+
     return mxfp8_dequantize(tensor, dtype)

@@ -100,5 +100,54 @@
     "aarch64_dependency_resolution": "triton3.5.0 + triton-ascend3.2.2 + pytest8.3.2",
     "aarch64_hardware_training_tested": false,
     "new_200_step_comparison_run": false
+  },
+  "no_triton_followup": {
+    "platform": "x86_64",
+    "python": "3.11.18",
+    "triton_installed": false,
+    "triton_ascend_installed": false,
+    "triton_import_spec": null,
+    "pip_index_used_for_test": "https://pypi.org/simple",
+    "extra_index_used_for_test": null,
+    "training_exit_code": 0,
+    "six_npu_training_steps": 5,
+    "losses": [
+      {
+        "step": 1,
+        "loss": 13.2276659,
+        "grad_norm": 1.74964523
+      },
+      {
+        "step": 2,
+        "loss": 13.17769241,
+        "grad_norm": 1.84241819
+      },
+      {
+        "step": 3,
+        "loss": 13.31243324,
+        "grad_norm": 2.39051318
+      },
+      {
+        "step": 4,
+        "loss": 13.63906479,
+        "grad_norm": 3.90207195
+      },
+      {
+        "step": 5,
+        "loss": 12.5469141,
+        "grad_norm": 4.10004902
+      }
+    ],
+    "reported_loss_mae_vs_previous_five_step_smoke": 0.0,
+    "safetensors_saved": true,
+    "megatron_checkpoint_saved": true,
+    "aarch64_hardware_training_tested": false,
+    "new_200_step_comparison_run": false,
+    "installation_exit_code": 0,
+    "pip_check_passed": true,
+    "installer_forced_huawei_index": false,
+    "source_checks": "all five source components under this checkout",
+    "initialization_passed": true,
+    "npu_matmul_passed": true
   }
 }

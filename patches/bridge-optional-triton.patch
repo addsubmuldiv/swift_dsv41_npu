@@ -1,0 +1,20 @@
+diff --git a/src/mcore_bridge/model/modules/kernels/qsa_kernels.py b/src/mcore_bridge/model/modules/kernels/qsa_kernels.py
+index 543ca59..dddbf69 100644
+--- a/src/mcore_bridge/model/modules/kernels/qsa_kernels.py
++++ b/src/mcore_bridge/model/modules/kernels/qsa_kernels.py
+@@ -33,14 +33,13 @@ import torch
+ 
+ from mcore_bridge.utils import get_env_args, get_logger
+ 
+-from .qsa_block_sparse_attn import qsa_block_sparse_attention
+-
+ logger = get_logger()
+ 
+ QSA_SPARSE_KERNEL_ENV = 'QSA_SPARSE_KERNEL'
+ 
+ try:
+     import triton  # noqa: F401  (import guard for the vendored kernel)
++    from .qsa_block_sparse_attn import qsa_block_sparse_attention
+     HAVE_TRITON = True
+ except Exception:  # pragma: no cover - triton absent
+     HAVE_TRITON = False

@@ -33,14 +33,13 @@ import torch
 
 from mcore_bridge.utils import get_env_args, get_logger
 
-from .qsa_block_sparse_attn import qsa_block_sparse_attention
-
 logger = get_logger()
 
 QSA_SPARSE_KERNEL_ENV = 'QSA_SPARSE_KERNEL'
 
 try:
     import triton  # noqa: F401  (import guard for the vendored kernel)
+    from .qsa_block_sparse_attn import qsa_block_sparse_attention
     HAVE_TRITON = True
 except Exception:  # pragma: no cover - triton absent
     HAVE_TRITON = False

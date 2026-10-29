@@ -1,0 +1,36 @@
+diff --git a/setup.py b/setup.py
+index 724ea18..7c7a0ec 100644
+--- a/setup.py
++++ b/setup.py
+@@ -71,11 +71,11 @@ setuptools.setup(
+     install_requires=[
+         "torch>=2.1.0",
+         "torch-npu",
+-        "triton-ascend",
+         "einops",
+         "packaging",
+         "nvdlfw-inspect",
+     ],
++    extras_require={"triton": ["triton-ascend==3.2.2"]},
+     packages=setuptools.find_packages(),
+     include_package_data=True,
+     install_package_data=True,
+diff --git a/transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py b/transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py
+index 47f0ca4..d265219 100644
+--- a/transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py
++++ b/transformer_engine/pytorch/tensor/storage/mxfp8_tensor_storage.py
+@@ -9,7 +9,6 @@ import torch
+ 
+ from ...constants import TensorUsage
+ from ...quantized_tensor import QuantizedTensorStorage, transpose_mx_data
+-from ...triton.mxfp8_dequantize import mxfp8_dequantize
+ 
+ if TYPE_CHECKING:
+     from ..mxfp8_tensor import MXFP8Quantizer
+@@ -354,4 +353,6 @@ class MXFP8TensorStorage(QuantizedTensorStorage):
+ 
+ def _dequantize_mxfp8_impl(tensor: MXFP8TensorStorage, dtype: torch.dtype) -> torch.Tensor:
+     """Shared MXFP8 dequantize implementation for forward and autograd apply."""
++    from ...triton.mxfp8_dequantize import mxfp8_dequantize
++
+     return mxfp8_dequantize(tensor, dtype)

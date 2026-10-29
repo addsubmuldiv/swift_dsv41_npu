@@ -26,9 +26,11 @@ Python 3.12 也允许安装；本仓库的新安装与训练验证使用 3.11。
 
 脚本会安装锁定版本的 Python 依赖，再 editable 安装五个本地目录，最后执行依赖检查、
 源码加载路径检查、NPU 张量运算及 DeepSeek V4.1 注册/初始化检查。
-当前固定 **Triton-Ascend 3.2.2**：x86_64 配社区 Triton 3.2.0，aarch64 配 3.5.0，pytest 配 8.3.2。
-脚本会显式从 Ascend 源预取匹配 Python/架构的 wheel，再解析依赖，并最后恢复 Ascend 的共享文件覆盖层。
-`PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 控制常规包索引；Ascend wheel 源可用 `ASCEND_PIP_INDEX_URL` 覆盖。
+默认不安装 Triton / Triton-Ascend，也不预取 Ascend wheel、不强制使用华为源。
+依赖下载沿用容器的 pip 配置；可通过 `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` 指定可达的镜像。
+当前示例使用 BF16、非融合 attention，不需要 Triton；MXFP8 和部分可选融合算子仍可能需要它。
+仅在明确需要这些算子时，另行准备可达的 wheel 源，使用 `constraints-triton.txt` 中的约束
+安装 `TransformerEngineNPU[triton]`（Ascend 3.2.2）；默认安装脚本不执行此步骤。
 如果容器里有内部标签不兼容的可选旧 decord wheel，脚本会移除它；本次只验证语言训练。
 
 ## 单机减层训练验证
@@ -71,6 +73,10 @@ bash examples/smoke_train.sh
 已应用的 py311 补丁：TENPU 安装最低版本调整；MCore 两处 `typing.override`
 改用 `typing_extensions.override`。补丁副本放在 `patches/`，安装时不再应用。
 依赖使用 `av==18.1.0`、`networkx==3.6.1`，避免旧环境中要求 Python 3.12 的版本。
+
+另已应用可选 Triton 补丁：TENPU 将 Triton 移到 extra 并延迟加载 MXFP8 内核；
+MCore 延迟加载 paged-stash 内核；bridge 将 QSA 内核导入放进已有的可用性检查。
+这样未启用这些功能时可以不安装 Triton。补丁同样位于 `patches/`。
 
 完整来源见 `sources.lock.json`；预置源码文件摘要见 `source-files.sha256.json`
 （普通文件散列内容，软链接散列链接目标文本）。各项目保留原始 LICENSE，详见 [THIRD_PARTY.md](THIRD_PARTY.md)。

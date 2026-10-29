@@ -29,7 +29,7 @@ See `validation.json` for the structured summary.
 
 ## Triton-Ascend 3.2.2 follow-up
 
-The installer now defaults to Triton-Ascend 3.2.2, not the 3.6.0 baseline above.
+At this historical stage, the installer defaulted to Triton-Ascend 3.2.2 instead of the 3.6.0 baseline above.
 Official cp311 wheel metadata requires community Triton 3.2.0 on x86_64,
 Triton 3.5.0 on aarch64, and pytest 8.3.2 on both.
 
@@ -41,7 +41,29 @@ Triton 3.5.0 on aarch64, and pytest 8.3.2 on both.
 - Two architecture-constraint regression tests: passed.
 - aarch64 hardware training was not run on this x86_64 host. No new 200-step precision comparison was run.
 
-The installer explicitly obtains the Ascend wheel from its dedicated index even
-when the container's `PIP_EXTRA_INDEX_URL` points elsewhere. It restores the Ascend
-shared-file overlay after community Triton installation, and verifies an NPU JIT kernel.
+At that stage the installer explicitly obtained the Ascend wheel from its dedicated index even
+when the container's `PIP_EXTRA_INDEX_URL` points elsewhere. It restored the Ascend
+shared-file overlay after community Triton installation, and verified an NPU JIT kernel.
 Historical 3.6.0 precision results are not relabeled as 3.2.2 results.
+
+## Default installation without Triton
+
+The default installer no longer installs community Triton or Triton-Ascend, fetches
+Ascend wheels, configures a Huawei index, or requires a Triton JIT verification.
+TENPU declares Triton as an optional extra. TENPU MXFP8 and MCore paged-stash kernels
+load only when used; bridge QSA kernel import is covered by its existing availability guard.
+
+Validated in an isolated x86_64 Python 3.11.18 environment, with both Triton distributions
+uninstalled and `importlib.util.find_spec("triton") is None`:
+
+- Full installer rerun against `https://pypi.org/simple` with no extra index: exit 0; pip check passed.
+- The installation log contains no Huawei index access or Triton collection.
+- All five source paths, DeepSeek initialization and NPU matmul: passed.
+- Six-NPU, four-layer, BF16 EP6/TP1 LoRA: completed five steps; exit 0.
+- Saved Megatron checkpoint and safetensors adapter.
+- All five reported losses and gradient norms exactly match the earlier smoke results above (reported-loss MAE 0).
+- Three dependency-constraint tests passed, including the optional TENPU dependency metadata check.
+
+Optional Triton constraints remain in `constraints-triton.txt`, outside the default
+requirements. MXFP8, paged stash and optional Triton attention kernels were not exercised.
+This is not an aarch64 hardware test or a new 200-step GPU/NPU precision comparison.
