@@ -1,0 +1,1448 @@
+{
+  "validation_kind": "static; no training weights or live communication groups allocated",
+  "world_size": 64,
+  "nodes": 4,
+  "npu_per_node": 16,
+  "rank_order": "tp-cp-ep-dp-pp",
+  "sizes": {
+    "tp": 1,
+    "cp": 1,
+    "pp": 4,
+    "ep": 16,
+    "etp": 1,
+    "dp": 16,
+    "expert_dp": 1
+  },
+  "rank_groups": {
+    "tp": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ],
+      [
+        22
+      ],
+      [
+        23
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        27
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ],
+      [
+        31
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ],
+      [
+        34
+      ],
+      [
+        35
+      ],
+      [
+        36
+      ],
+      [
+        37
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ],
+      [
+        40
+      ],
+      [
+        41
+      ],
+      [
+        42
+      ],
+      [
+        43
+      ],
+      [
+        44
+      ],
+      [
+        45
+      ],
+      [
+        46
+      ],
+      [
+        47
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        50
+      ],
+      [
+        51
+      ],
+      [
+        52
+      ],
+      [
+        53
+      ],
+      [
+        54
+      ],
+      [
+        55
+      ],
+      [
+        56
+      ],
+      [
+        57
+      ],
+      [
+        58
+      ],
+      [
+        59
+      ],
+      [
+        60
+      ],
+      [
+        61
+      ],
+      [
+        62
+      ],
+      [
+        63
+      ]
+    ],
+    "cp": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ],
+      [
+        22
+      ],
+      [
+        23
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        27
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ],
+      [
+        31
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ],
+      [
+        34
+      ],
+      [
+        35
+      ],
+      [
+        36
+      ],
+      [
+        37
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ],
+      [
+        40
+      ],
+      [
+        41
+      ],
+      [
+        42
+      ],
+      [
+        43
+      ],
+      [
+        44
+      ],
+      [
+        45
+      ],
+      [
+        46
+      ],
+      [
+        47
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        50
+      ],
+      [
+        51
+      ],
+      [
+        52
+      ],
+      [
+        53
+      ],
+      [
+        54
+      ],
+      [
+        55
+      ],
+      [
+        56
+      ],
+      [
+        57
+      ],
+      [
+        58
+      ],
+      [
+        59
+      ],
+      [
+        60
+      ],
+      [
+        61
+      ],
+      [
+        62
+      ],
+      [
+        63
+      ]
+    ],
+    "dp": [
+      [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      [
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ],
+      [
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63
+      ]
+    ],
+    "pp": [
+      [
+        0,
+        16,
+        32,
+        48
+      ],
+      [
+        1,
+        17,
+        33,
+        49
+      ],
+      [
+        2,
+        18,
+        34,
+        50
+      ],
+      [
+        3,
+        19,
+        35,
+        51
+      ],
+      [
+        4,
+        20,
+        36,
+        52
+      ],
+      [
+        5,
+        21,
+        37,
+        53
+      ],
+      [
+        6,
+        22,
+        38,
+        54
+      ],
+      [
+        7,
+        23,
+        39,
+        55
+      ],
+      [
+        8,
+        24,
+        40,
+        56
+      ],
+      [
+        9,
+        25,
+        41,
+        57
+      ],
+      [
+        10,
+        26,
+        42,
+        58
+      ],
+      [
+        11,
+        27,
+        43,
+        59
+      ],
+      [
+        12,
+        28,
+        44,
+        60
+      ],
+      [
+        13,
+        29,
+        45,
+        61
+      ],
+      [
+        14,
+        30,
+        46,
+        62
+      ],
+      [
+        15,
+        31,
+        47,
+        63
+      ]
+    ],
+    "ep": [
+      [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      [
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ],
+      [
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63
+      ]
+    ],
+    "etp": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ],
+      [
+        22
+      ],
+      [
+        23
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        27
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ],
+      [
+        31
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ],
+      [
+        34
+      ],
+      [
+        35
+      ],
+      [
+        36
+      ],
+      [
+        37
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ],
+      [
+        40
+      ],
+      [
+        41
+      ],
+      [
+        42
+      ],
+      [
+        43
+      ],
+      [
+        44
+      ],
+      [
+        45
+      ],
+      [
+        46
+      ],
+      [
+        47
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        50
+      ],
+      [
+        51
+      ],
+      [
+        52
+      ],
+      [
+        53
+      ],
+      [
+        54
+      ],
+      [
+        55
+      ],
+      [
+        56
+      ],
+      [
+        57
+      ],
+      [
+        58
+      ],
+      [
+        59
+      ],
+      [
+        60
+      ],
+      [
+        61
+      ],
+      [
+        62
+      ],
+      [
+        63
+      ]
+    ],
+    "expert_dp": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ],
+      [
+        12
+      ],
+      [
+        13
+      ],
+      [
+        14
+      ],
+      [
+        15
+      ],
+      [
+        16
+      ],
+      [
+        17
+      ],
+      [
+        18
+      ],
+      [
+        19
+      ],
+      [
+        20
+      ],
+      [
+        21
+      ],
+      [
+        22
+      ],
+      [
+        23
+      ],
+      [
+        24
+      ],
+      [
+        25
+      ],
+      [
+        26
+      ],
+      [
+        27
+      ],
+      [
+        28
+      ],
+      [
+        29
+      ],
+      [
+        30
+      ],
+      [
+        31
+      ],
+      [
+        32
+      ],
+      [
+        33
+      ],
+      [
+        34
+      ],
+      [
+        35
+      ],
+      [
+        36
+      ],
+      [
+        37
+      ],
+      [
+        38
+      ],
+      [
+        39
+      ],
+      [
+        40
+      ],
+      [
+        41
+      ],
+      [
+        42
+      ],
+      [
+        43
+      ],
+      [
+        44
+      ],
+      [
+        45
+      ],
+      [
+        46
+      ],
+      [
+        47
+      ],
+      [
+        48
+      ],
+      [
+        49
+      ],
+      [
+        50
+      ],
+      [
+        51
+      ],
+      [
+        52
+      ],
+      [
+        53
+      ],
+      [
+        54
+      ],
+      [
+        55
+      ],
+      [
+        56
+      ],
+      [
+        57
+      ],
+      [
+        58
+      ],
+      [
+        59
+      ],
+      [
+        60
+      ],
+      [
+        61
+      ],
+      [
+        62
+      ],
+      [
+        63
+      ]
+    ],
+    "expert_pp": [
+      [
+        0,
+        16,
+        32,
+        48
+      ],
+      [
+        1,
+        17,
+        33,
+        49
+      ],
+      [
+        2,
+        18,
+        34,
+        50
+      ],
+      [
+        3,
+        19,
+        35,
+        51
+      ],
+      [
+        4,
+        20,
+        36,
+        52
+      ],
+      [
+        5,
+        21,
+        37,
+        53
+      ],
+      [
+        6,
+        22,
+        38,
+        54
+      ],
+      [
+        7,
+        23,
+        39,
+        55
+      ],
+      [
+        8,
+        24,
+        40,
+        56
+      ],
+      [
+        9,
+        25,
+        41,
+        57
+      ],
+      [
+        10,
+        26,
+        42,
+        58
+      ],
+      [
+        11,
+        27,
+        43,
+        59
+      ],
+      [
+        12,
+        28,
+        44,
+        60
+      ],
+      [
+        13,
+        29,
+        45,
+        61
+      ],
+      [
+        14,
+        30,
+        46,
+        62
+      ],
+      [
+        15,
+        31,
+        47,
+        63
+      ]
+    ]
+  },
+  "experts_per_rank": 24,
+  "microbatches_per_step": 4,
+  "stages": [
+    {
+      "node_rank": 0,
+      "global_ranks": [
+        0,
+        15
+      ],
+      "hf_layers": [
+        0,
+        9
+      ],
+      "hybrid_indices": [
+        0,
+        19
+      ],
+      "engram_hf_layer_ids": [
+        1
+      ]
+    },
+    {
+      "node_rank": 1,
+      "global_ranks": [
+        16,
+        31
+      ],
+      "hf_layers": [
+        10,
+        19
+      ],
+      "hybrid_indices": [
+        20,
+        39
+      ],
+      "engram_hf_layer_ids": [
+        14
+      ]
+    },
+    {
+      "node_rank": 2,
+      "global_ranks": [
+        32,
+        47
+      ],
+      "hf_layers": [
+        20,
+        29
+      ],
+      "hybrid_indices": [
+        40,
+        59
+      ],
+      "engram_hf_layer_ids": []
+    },
+    {
+      "node_rank": 3,
+      "global_ranks": [
+        48,
+        63
+      ],
+      "hf_layers": [
+        30,
+        39
+      ],
+      "hybrid_indices": [
+        60,
+        79
+      ],
+      "engram_hf_layer_ids": []
+    }
+  ],
+  "pipeline_boundaries": [
+    {
+      "boundary_id": "hybrid.decoder/pp:20",
+      "send_receive_fingerprints_match": true,
+      "tensors": [
+        {
+          "name": "hidden_states",
+          "shape": [
+            128,
+            1,
+            20480
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "pre_mix",
+          "shape": [
+            128,
+            1,
+            4
+          ],
+          "dtype": "torch.float32"
+        },
+        {
+          "name": "global_kv",
+          "shape": [
+            64,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "global_indices",
+          "shape": [
+            1,
+            128,
+            64
+          ],
+          "dtype": "torch.int32"
+        }
+      ]
+    },
+    {
+      "boundary_id": "hybrid.decoder/pp:40",
+      "send_receive_fingerprints_match": true,
+      "tensors": [
+        {
+          "name": "hidden_states",
+          "shape": [
+            128,
+            1,
+            20480
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "pre_mix",
+          "shape": [
+            128,
+            1,
+            4
+          ],
+          "dtype": "torch.float32"
+        }
+      ]
+    },
+    {
+      "boundary_id": "hybrid.decoder/pp:60",
+      "send_receive_fingerprints_match": true,
+      "tensors": [
+        {
+          "name": "hidden_states",
+          "shape": [
+            128,
+            1,
+            20480
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "pre_mix",
+          "shape": [
+            128,
+            1,
+            4
+          ],
+          "dtype": "torch.float32"
+        },
+        {
+          "name": "global_kv",
+          "shape": [
+            128,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "indexer_k",
+          "shape": [
+            128,
+            1,
+            128
+          ],
+          "dtype": "torch.bfloat16"
+        },
+        {
+          "name": "global_indices",
+          "shape": [
+            1,
+            128,
+            128
+          ],
+          "dtype": "torch.int32"
+        },
+        {
+          "name": "candidate_indices",
+          "shape": [
+            1,
+            128,
+            16
+          ],
+          "dtype": "torch.int32"
+        },
+        {
+          "name": "candidate_lengths",
+          "shape": [
+            1,
+            128
+          ],
+          "dtype": "torch.int32"
+        }
+      ]
+    }
+  ],
+  "checks": [
+    "native_rank_generation_all_64_ranks",
+    "real_config_validators",
+    "full_layer_specs",
+    "Engram_startup_and_prime_row_shards",
+    "CSA2_mHC_payload_schema_24_and_128_tokens",
+    "same_PP_inputs_across_10_steps_and_epoch_boundaries"
+  ],
+  "multi_node_hccl_tested": false,
+  "full_model_training_tested": false,
+  "model_config_sha256": "8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879",
+  "dataset_sha256": "7994bd6e7faccb50903a881c7c42e0ecfcbc20d326782974f3c04cab552ec980",
+  "test_summary": {
+    "passed": 24,
+    "failed": 0,
+    "skipped": 0
+  },
+  "config_audit_caveat": "Only the live-process-group-dependent bridge allocation was deferred; native config/startup/layer-spec validators ran. Pipeline objects provide placement metadata only; payload specs use meta tensors.",
+  "source_snapshot": "35a1242e4bd62c8ecb54129bd9f359ae28970fea",
+  "source_locks": {
+    "ms-swift": {
+      "upstream": "https://github.com/addsubmuldiv/ms-swift",
+      "commit": "a013ae639060ba3439a60dd7cb07ff9561d06be6",
+      "local_patches": []
+    },
+    "mcore-bridge": {
+      "upstream": "https://github.com/addsubmuldiv/mcore-bridge",
+      "commit": "e7cb294a24cf98ac16be85774646cc8f46f9f6c2",
+      "local_patches": [
+        "patches/bridge-optional-triton.patch",
+        "patches/bridge-engram-pp.patch"
+      ]
+    },
+    "Megatron-LM": {
+      "upstream": "https://github.com/NVIDIA/Megatron-LM",
+      "commit": "5c6efbc278b708c046e5b558964cb021f6fd750b",
+      "local_patches": [
+        "patches/mcore-python311.patch",
+        "patches/mcore-optional-triton.patch"
+      ]
+    },
+    "MegatronAdaptor": {
+      "upstream": "https://gitcode.com/Ascend/MegatronAdaptor",
+      "commit": "c7e52b2c8482105e6ec7fcd8cdef364e7c7b22c5",
+      "local_patches": []
+    },
+    "TransformerEngineNPU": {
+      "upstream": "https://gitcode.com/Ascend/TransformerEngineNPU",
+      "commit": "93eca54f264510f31dd10b68cd8ae18ad9a96bbe",
+      "local_patches": [
+        "patches/tenpu-python311.patch",
+        "patches/tenpu-optional-triton.patch"
+      ]
+    }
+  },
+  "checkpoint_shape_weight_estimate": {
+    "method": "Read safetensors headers only. FP4 I8 matrices unpack two values per byte; quantized weights expand to BF16, F32 tensors remain F32 for a conservative count. Experts and Engram rows are divided across EP16; other text parameters are replicated within each PP stage. Excludes vision and DSpark.",
+    "stage_base_weights_gib": [
+      {
+        "dense": 4.657,
+        "experts": 15.82,
+        "engram": 11.444,
+        "total": 31.921
+      },
+      {
+        "dense": 3.404,
+        "experts": 15.82,
+        "engram": 11.445,
+        "total": 30.669
+      },
+      {
+        "dense": 3.126,
+        "experts": 15.82,
+        "engram": 0.0,
+        "total": 18.946
+      },
+      {
+        "dense": 4.344,
+        "experts": 15.82,
+        "engram": 0.0,
+        "total": 20.164
+      }
+    ],
+    "excludes": [
+      "LoRA parameters and optimizer buffers",
+      "activations",
+      "communication workspaces",
+      "allocator overhead",
+      "temporary dequantization buffers"
+    ],
+    "measured_peak": false
+  },
+  "static_audit_environment": {
+    "python": "3.11.18",
+    "torch": "2.10.0+cpu",
+    "torch-npu": "2.10.0.post7",
+    "transformers": "5.12.1",
+    "megatron-core": "0.19.0",
+    "transformer-engine": "2.17.1",
+    "mcore-bridge": "1.7.0.dev0",
+    "ms-swift": "4.7.0.dev0"
+  }
+}

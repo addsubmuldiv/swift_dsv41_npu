@@ -49,3 +49,6 @@ HybridModel 将其传给 Engram 和重计算路径，层位置使用全局 Hybri
 通用 MCore 的 PP 限制及 TP/SP/ETP 等其他校验保持原样。
 10 项 CPU 校验/依赖测试通过，覆盖真实 Engram PP4 启动校验、重计算及中间 PP 阶段的 token 保留；
 这不代表完整四机训练已经验证。补丁位于 `patches/bridge-engram-pp.patch`，已应用，无需手动打补丁。
+
+完整的 64-rank 拓扑、模型层切分、跨阶段状态和显存估计见
+[四机 LoRA 拓扑静态检查](../docs/四机LoRA拓扑静态检查.md)：24 项检查通过，无跳过，仍未实测四机训练。

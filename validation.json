@@ -181,6 +181,30 @@
       "generic_engram_pp_guard_preserved": true,
       "tp_sp_etp_guards_preserved": true,
       "multi_node_training_tested": false
+    },
+    "expanded_static_audit": {
+      "tests_passed": 24,
+      "tests_failed": 0,
+      "tests_skipped": 0,
+      "world_size": 64,
+      "sizes": {
+        "tp": 1,
+        "cp": 1,
+        "pp": 4,
+        "ep": 16,
+        "etp": 1,
+        "dp": 16,
+        "expert_dp": 1
+      },
+      "report": "docs/evidence/four_node_topology.json",
+      "three_pipeline_boundary_schemas_matched_at_lengths": [
+        24,
+        128
+      ],
+      "full_layer_spec_construction_passed": true,
+      "same_pp_data_across_40_microbatches": true,
+      "group_communication_tested": false,
+      "training_forward_backward_tested": false
     }
   }
 }
